@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-from utils.utils import save_to_excel, update_dashboard, combined_df
+from utils.utils import save_to_excel, update_dashboard, combined_df, make_archive_copy
 from environment.settings import config
 from database.ms_sql_connection import fetch_query
 
@@ -335,20 +335,42 @@ def parvo_chart(*,numerator, denominator, path) -> None:
   return
 
 
-def run_parvo_report(report_year):
-  df_denom=parse_combined_data(parvo_denominator, report_year)
-  df_num=parse_combined_data(parvo_numerator, report_year)
-  save_to_excel(numerator=df_num, denominator=df_denom, path=report_path)
-  parvo_chart(path=chart_path, numerator=df_num, denominator=df_denom)
-  update_dashboard(dashboard_path)
+def run_parvo_report(report_year: int, report_month: int):
+    """Generate parvovirus report and archive files by year/month"""
+    
+    # --- Parse data ---
+    df_denom = parse_combined_data(parvo_denominator, report_year)
+    df_num = parse_combined_data(parvo_numerator, report_year)
+
+    # --- Define file paths ---
+    report_filename = "parvovirus_report.xlsx"
+    report_path = f"{config.SERVER_PATH}/parvo/{report_filename}"
+
+    chart_filename = "parvovirus_chart_data.xlsx"
+    chart_path = f"{config.SERVER_PATH}/parvo/{chart_filename}"
+
+    dashboard_filename = "parvovirus_report_dashBoard.xlsx"
+    dashboard_path = f"{config.SERVER_PATH}/parvo/{dashboard_filename}"
+
+    # --- Save report ---
+    save_to_excel(numerator=df_num, denominator=df_denom, path=report_path)
+
+    # --- Generate chart data ---
+    parvo_chart(path=chart_path, numerator=df_num, denominator=df_denom)
+
+    # --- Update dashboard ---
+    update_dashboard(dashboard_path)
+
+    # --- Archive copies with year/month appended ---
+    make_archive_copy(
+        report_year,
+        report_month,
+        base_path=f"{config.SERVER_PATH}/parvo",
+        paths_to_copy=[report_path, chart_path, dashboard_path]
+    )
+
+    return
 
 
-#Path to report on local server
-report_filename="parvovirus_report.xlsx"
-report_path=f"{config.SERVER_PATH}/parvo/{report_filename}"
-#chart data path
-chart_filename="parvovirus_chart_data.xlsx"
-chart_path=f"{config.SERVER_PATH}/parvo/{chart_filename}"
-#dashboard_path
-dashboard_filename="parvovirus_report_dashBoard.xlsx"
-dashboard_path=f"{config.SERVER_PATH}/parvo/{dashboard_filename}"
+
+

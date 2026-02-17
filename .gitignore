@@ -5,6 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
+restore_db.py
+mortality_report.py
 
 # Distribution / packaging
 .Python

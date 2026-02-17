@@ -4,7 +4,7 @@ import os
 from prefect import task
 from dateutil.relativedelta import relativedelta
 from database.ms_sql_connection import fetch_query
-from utils.utils import save_to_excel, update_dashboard, combined_df
+from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy
 from environment.settings import config
 
 
@@ -364,34 +364,6 @@ def uri_chart(*,numerator, denominator, path) -> None:
   chart_data.to_excel(path, index=False)
   return chart_data
 
-def filter_last_12_months(df):
-    """
-    Filters the DataFrame to include only rows where SurgeryDate is within the last 12 full months,
-    counting back from the 1st day of the current month.
-
-    Parameters:
-        df (pd.DataFrame): Input DataFrame with 'SurgeryDate' column.
-
-    Returns:
-        pd.DataFrame: Filtered DataFrame with only the last 12 full months of data.
-    """
-    # Ensure SurgeryDate is datetime
-    df['Referencedate'] = pd.to_datetime(df['Referencedate'])
-
-    # Get today's date normalized to midnight
-    today = pd.Timestamp.today().normalize()
-
-    # First day of the current month
-    max_date = today.replace(day=1)
-
-    # Start date = first day of the month 12 months ago
-    start_date = max_date - relativedelta(months=13)
-
-    # Filter SurgeryDate between start_date (inclusive) and max_date (exclusive)
-    mask = (df['Referencedate'] >= start_date) & (df['Referencedate'] < max_date)
-    filtered_df = df.loc[mask]
-
-    return filtered_df
 
 def process_incidence_bi_data(df):
     df['Referencedate'] = pd.to_datetime(df['Referencedate'])
@@ -415,40 +387,66 @@ def process_incidence_bi_data(df):
     return pivot_df[['species', 'Month', 'Agegroup', 'infection_percent']]
 
 
+def run_uri_report(report_year: int, report_month: int):
+    """Generate URI report and archive files by year/month"""
+    
+    # --- Parse current year data ---
+    df_denom = parse_combined_data(uri_denominator, report_year)
+    df_num = parse_combined_data(uri_numerator, report_year)
 
-def run_uri_report(report_year):
-  df_denom=parse_combined_data(uri_denominator, report_year)
-  df_num=parse_combined_data(uri_numerator, report_year)
- # Parse previous year data
-  print("Fetching denominator data for previous year...")
-  df_denom_prev_year = parse_combined_data(uri_denominator, report_year-1)
-  print(f"Denominator data for {report_year-1} loaded. Shape: {df_denom_prev_year.shape}")
+    # --- Parse previous year data ---
+    print("Fetching denominator data for previous year...")
+    df_denom_prev_year = parse_combined_data(uri_denominator, report_year-1)
+    print(f"Denominator data for {report_year-1} loaded. Shape: {df_denom_prev_year.shape}")
 
-  print("Fetching numerator data for previous year...")
-  df_num_prev_year = parse_combined_data(uri_numerator, report_year-1)
-  print(f"Numerator data for {report_year-1} loaded. Shape: {df_num_prev_year.shape}")
-  two_year_denom=pd.concat([df_denom_prev_year,df_denom], ignore_index=True)
-  two_year_num=pd.concat([df_num_prev_year,df_num], ignore_index=True)
-  bi_data=uri_chart(path=bi_report_path, numerator=two_year_num, denominator=two_year_denom)
-  bi_data=filter_last_12_months(bi_data)
-  bi_data=process_incidence_bi_data(bi_data)
-  bi_data.to_excel(bi_report_path,index=False)
-  
-  save_to_excel(path=report_path,numerator=df_num, denominator=df_denom)
-  uri_chart(path=chart_path, numerator=df_num, denominator=df_denom)
-  update_dashboard(dashboard_path)
+    print("Fetching numerator data for previous year...")
+    df_num_prev_year = parse_combined_data(uri_numerator, report_year-1)
+    print(f"Numerator data for {report_year-1} loaded. Shape: {df_num_prev_year.shape}")
+
+    # --- Combine two-year data ---
+    two_year_denom = pd.concat([df_denom_prev_year, df_denom], ignore_index=True)
+    two_year_num = pd.concat([df_num_prev_year, df_num], ignore_index=True)
+
+    # --- Define file paths ---
+    bi_report_filename = "uri_infection_percent_bi_data.xlsx"
+    bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
+
+    report_filename = "uri_report.xlsx"
+    report_path = f"{config.SERVER_PATH}/uri/{report_filename}"
+
+    chart_filename = "uri_chart_data.xlsx"
+    chart_path = f"{config.SERVER_PATH}/uri/{chart_filename}"
+
+    dashboard_filename = "uri_report_dashBoard.xlsx"
+    dashboard_path = f"{config.SERVER_PATH}/uri/{dashboard_filename}"
+
+    # --- Generate BI data ---
+    bi_data = uri_chart(path=bi_report_path, numerator=two_year_num, denominator=two_year_denom)
+    bi_data = filter_last_12_months(bi_data, report_year, 'Referencedate')
+    bi_data = process_incidence_bi_data(bi_data)
+    bi_data.to_excel(bi_report_path, index=False)
+
+    # --- Save main report ---
+    save_to_excel(path=report_path, numerator=df_num, denominator=df_denom)
+
+    # --- Generate chart data ---
+    uri_chart(path=chart_path, numerator=df_num, denominator=df_denom)
+
+    # --- Update dashboard ---
+    update_dashboard(dashboard_path)
+
+    # --- Archive copies with year/month appended ---
+    make_archive_copy(
+        report_year,
+        report_month,
+        base_path=f"{config.SERVER_PATH}/uri",
+        paths_to_copy=[report_path,  chart_path, dashboard_path]
+    )
+
+    return
+
+
  
 
 
-#Path to power_bi_data report on local server
-bi_report_filename="uri_infection_percent_bi_data.xlsx"
-bi_report_path=f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
-#Path to report on local server
-report_filename="uri_report.xlsx"
-report_path=f"{config.SERVER_PATH}/uri/{report_filename}"
-#chart data path
-chart_filename="uri_chart_data.xlsx"
-chart_path=f"{config.SERVER_PATH}/uri/{chart_filename}"
-#dashboard_path
-dashboard_filename="uri_report_dashBoard.xlsx"
-dashboard_path=f"{config.SERVER_PATH}/uri/{dashboard_filename}"
+

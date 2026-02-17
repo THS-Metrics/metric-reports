@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from database.ms_sql_connection import fetch_query
-from utils.utils import save_to_excel, update_dashboard, combined_df
+from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy
 from environment.settings import config
 
 
@@ -11,6 +11,7 @@ def numerator(year, month):
     and month values"""
     #Constructs date value for first of every month
     reference_date=f'{year}-{month:02}-01'
+    print(f"num ref date: {reference_date}")
     query=f"""WITH numerator
     AS (SELECT DISTINCT
       Animal.AnimalID,
@@ -78,6 +79,7 @@ def denominator(year, month):
     and monthvalues"""
     #Constructs date value for first of every month
     reference_date=f'{year}-{month:02}-01'
+    print(f"denom ref date: {reference_date}")
     query= f"""
 
     /*The Denominator dataset compiles information on all pets present in the shelter at the beginning of the month, 
@@ -192,7 +194,7 @@ def denominator(year, month):
     AND (txnVisit.IntakeType IN ('TransferIn', 'Stray', '[Return]', 'OwnerSurrender'))
     AND (refOperationStatus.OperationStatus = 'Completed')
     AND txnVisit.tin_DateCreated >= '{reference_date}'
-    AND txnVisit.tin_DateCreated < EOMONTH('{reference_date}')),
+    AND txnVisit.tin_DateCreated <= EOMONTH('{reference_date}')),
 
     /*Intake_exclusion generates records of all animals to be excluded from intake records
     Animals who came to the shelter and developed diarrhea within one day of coming into the shelter need to be excluded*/
@@ -355,34 +357,6 @@ def diarrhea_chart_data(*,numerator, denominator, path) -> None:
   chart_data.to_excel(path, index=False)
   return chart_data
 
-def filter_last_12_months(df):
-    """
-    Filters the DataFrame to include only rows where SurgeryDate is within the last 12 full months,
-    counting back from the 1st day of the current month.
-
-    Parameters:
-        df (pd.DataFrame): Input DataFrame with 'SurgeryDate' column.
-
-    Returns:
-        pd.DataFrame: Filtered DataFrame with only the last 12 full months of data.
-    """
-    # Ensure SurgeryDate is datetime
-    df['Referencedate'] = pd.to_datetime(df['Referencedate'])
-
-    # Get today's date normalized to midnight
-    today = pd.Timestamp.today().normalize()
-
-    # First day of the current month
-    max_date = today.replace(day=1)
-
-    # Start date = first day of the month 12 months ago
-    start_date = max_date - relativedelta(months=13)
-
-    # Filter SurgeryDate between start_date (inclusive) and max_date (exclusive)
-    mask = (df['Referencedate'] >= start_date) & (df['Referencedate'] < max_date)
-    filtered_df = df.loc[mask]
-
-    return filtered_df
 
 def process_incidence_bi_data(df):
     df['Referencedate'] = pd.to_datetime(df['Referencedate'])
@@ -407,69 +381,44 @@ def process_incidence_bi_data(df):
 
 
 
-
-def run_diarrhea_report(report_year):
-    print(f"Starting diarrhea report generation for year: {report_year}")
-
-    # Parse current year data
-    print("Parsing denominator data for current year...")
+def run_diarrhea_report(report_year: int, report_month: int):
+    """Generate diarrhea report and archive files by year/month"""
+  
     df_denom = parse_combined_data(denominator, report_year)
-    print(f"Denominator data for {report_year} loaded. Shape: {df_denom.shape}")
-
-    print("Parsing numerator data for current year...")
     df_num = parse_combined_data(numerator, report_year)
-    print(f"Numerator data for {report_year} loaded. Shape: {df_num.shape}")
-
-    # Parse previous year data
-    print("Fetching denominator data for previous year...")
     df_denom_prev_year = parse_combined_data(denominator, report_year-1)
-    print(f"Denominator data for {report_year-1} loaded. Shape: {df_denom_prev_year.shape}")
-
-    print("Fetching numerator data for previous year...")
     df_num_prev_year = parse_combined_data(numerator, report_year-1)
-    print(f"Numerator data for {report_year-1} loaded. Shape: {df_num_prev_year.shape}")
-
-    # Combine two-year data
-    print("Combining two years of denominator and numerator data...")
     two_year_denom = pd.concat([df_denom_prev_year, df_denom], ignore_index=True)
     two_year_num = pd.concat([df_num_prev_year, df_num], ignore_index=True)
-    print(f"Combined two-year denominator shape: {two_year_denom.shape}")
-    print(f"Combined two-year numerator shape: {two_year_num.shape}")
 
-    # Generate Power BI data
-    print("Generating Power BI chart data...")
+    # --- Define file paths ---
+    bi_report_filename = "diarrhea_infection_percent_bi_data.xlsx"
+    report_filename = "diarrhea_report_raw_data.xlsx"
+    chart_filename = "diarrhea_chart_data.xlsx"
+    dashboard_filename = "diarrhea_report.xlsx"
+
+    bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
+    report_path = f"{config.SERVER_PATH}/diarrhea/{report_filename}"
+    chart_path = f"{config.SERVER_PATH}/diarrhea/{chart_filename}"
+    dashboard_path = f"{config.SERVER_PATH}/diarrhea/{dashboard_filename}"
+
+    # --- Generate Power BI data ---
     bi_data = diarrhea_chart_data(path=bi_report_path, numerator=two_year_num, denominator=two_year_denom)
-    bi_data = filter_last_12_months(bi_data)
+    bi_data = filter_last_12_months(bi_data, report_year, 'Referencedate')
     bi_data = process_incidence_bi_data(bi_data)
     bi_data.to_excel(bi_report_path, index=False)
-    print(f"Power BI data saved to {bi_report_path}")
 
-    # Save Excel report
-    print("Saving main report Excel files...")
+    # --- Save main report ---
     save_to_excel(path=report_path, numerator=df_num, denominator=df_denom)
-    print(f"Main report saved to {report_path}")
-
-    # Generate charts
-    print("Generating diarrhea charts...")
     diarrhea_chart_data(path=chart_path, numerator=df_num, denominator=df_denom)
-    print(f"Charts saved to {chart_path}")
-
-    # Update dashboard
-    print("Updating dashboard...")
     update_dashboard(dashboard_path)
-    print(f"Dashboard updated at {dashboard_path}")
+
+    # --- Make archive copies ---
+    make_archive_copy(
+        report_year,
+        report_month,
+        base_path=f"{config.SERVER_PATH}/diarrhea",
+        paths_to_copy=[report_path, chart_path, dashboard_path]
+    )
 
     print(f"Diarrhea report generation for year {report_year} completed.")
-
-  
-
-bi_report_filename="diarrhea_infection_percent_bi_data.xlsx"
-report_filename="diarrhea_report_raw_data.xlsx"
-bi_report_path=f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
-report_path=f"{config.SERVER_PATH}/diarrhea/{report_filename}"
-#chart data path
-chart_filename="diarrhea_chart_data.xlsx"
-chart_path=f"{config.SERVER_PATH}/diarrhea/{chart_filename}"
-#dashboard_path
-dashboard_filename="diarrhea_report.xlsx"
-dashboard_path=f"{config.SERVER_PATH}/diarrhea/{dashboard_filename}"

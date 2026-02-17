@@ -4,9 +4,10 @@ import calendar
 import os
 import numpy as np
 from dateutil.relativedelta import relativedelta
-from utils.utils import save_to_excel, update_dashboard, combined_df
+from utils.utils import save_to_excel, update_dashboard, combined_df, make_archive_copy
 from database.ms_sql_connection import fetch_query
 from environment.settings import config
+
 
 
 def extraction(year: int, month: int) -> pd.DataFrame:
@@ -289,31 +290,42 @@ def process_bi_data(df):
 
     return final_result
 
-def run_kitten_report(report_year):
-    """Function to run all scripts"""
-    df=parse_combined_df(extraction, report_year, report_year)
-    power_bi_df=filter_last_12_months(df)
-    power_bi_df_summary=process_bi_data(power_bi_df)
-    with pd.ExcelWriter(bi_report_path, engine='openpyxl') as writer:
-      power_bi_df.to_excel(writer, sheet_name='Sheet2', index=False)
-      power_bi_df_summary.to_excel(writer, sheet_name='Sheet1', index=False)
-    df_num=df[df['Outcometype'].isin(['Died', 'Euthanised'])]
-    save_to_excel(df_num, df, report_path)
-    update_dashboard(dashboard_path)
 
+
+def run_kitten_report(report_year:int, report_month:int):
+    """Run all scripts, save reports, and copy to year/month folder"""
+    
+    # --- Run your data processing ---
+    df = parse_combined_df(extraction, report_year, report_year)
+    power_bi_df = filter_last_12_months(df)
+    power_bi_df_summary = process_bi_data(power_bi_df)
+    
+    # --- Original report paths (unchanged) ---
+    report_filename = "kitten_mortality.xlsx"
+    bi_report_filename = "kitten_mortality_bi.xlsx"
+    dashboard_filename = "Kitten_Mortality_DashBoard.xlsx"
+    
+    report_path = f"{config.SERVER_PATH}/kitten_mortality/{report_filename}"
+    bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
+    dashboard_path = f"{config.SERVER_PATH}/kitten_mortality/{dashboard_filename}"
+    
+    # --- Save Power BI Excel ---
+    with pd.ExcelWriter(bi_report_path, engine='openpyxl') as writer:
+        power_bi_df.to_excel(writer, sheet_name='Sheet2', index=False)
+        power_bi_df_summary.to_excel(writer, sheet_name='Sheet1', index=False)
+    
+    # --- Save mortality report ---
+    df_num = df[df['Outcometype'].isin(['Died', 'Euthanised'])]
+    save_to_excel(df_num, df, report_path)
+    
+    # --- Update dashboard ---
+    update_dashboard(dashboard_path)
+    #make archive copies
+    make_archive_copy(report_year, report_month,base_path=f"{config.SERVER_PATH}/kitten_mortality", paths_to_copy=[report_path, dashboard_path] )
+    
+    
+    
     return
 
 
 
-    
-#Path to report on local server
-report_filename="kitten_mortality.xlsx"
-report_path=f"{config.SERVER_PATH}/kitten_mortality/{report_filename}"
-#Path to power_bi_data report on local server
-bi_report_filename="kitten_mortality_bi.xlsx"
-bi_report_path=f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
-bi_remote_path=os.environ.get("BI_REMOTE_PATH")
-#dashboard_path
-dashboard_filename="Kitten_Mortality_DashBoard.xlsx"
-dashboard_path=f"{config.SERVER_PATH}/kitten_mortality/{dashboard_filename}"
-#Year report should start from

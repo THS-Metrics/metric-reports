@@ -6,7 +6,7 @@ import numpy as np
 from itertools import product
 from dateutil.relativedelta import relativedelta
 from database.ms_sql_connection import fetch_query
-from utils.utils import save_to_excel, update_dashboard, combined_df
+from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy
 from environment.settings import config
 
 def denominator_extraction(year: int, month: int) -> pd.DataFrame:
@@ -217,36 +217,6 @@ def create_dashboard_data(numerator, denominator, path: str) -> None :
 
 
 
-def filter_last_12_months(df):
-    """
-    Filters the DataFrame to include only rows where SurgeryDate is within the last 12 full months,
-    counting back from the 1st day of the current month.
-
-    Parameters:
-        df (pd.DataFrame): Input DataFrame with 'SurgeryDate' column.
-
-    Returns:
-        pd.DataFrame: Filtered DataFrame with only the last 12 full months of data.
-    """
-    # Ensure SurgeryDate is datetime
-    df["SurgeryDate"] = pd.to_datetime(df["SurgeryDate"])
-
-    # Get today's date normalized to midnight
-    today = pd.Timestamp.today().normalize()
-
-    # First day of the current month
-    max_date = today.replace(day=1)
-
-    # Start date = first day of the month 12 months ago
-    start_date = max_date - relativedelta(months=13)
-
-    # Filter SurgeryDate between start_date (inclusive) and max_date (exclusive)
-    mask = (df["SurgeryDate"] >= start_date) & (df["SurgeryDate"] < max_date)
-    filtered_df = df.loc[mask]
-
-    return filtered_df
-
-
 def process_bi_data(df):
     """
     Filters and processes surgery data to compute the percentage distribution of 'Type'
@@ -305,36 +275,51 @@ def process_bi_data(df):
     return final_df
 
 
+def run_incidence_report(report_year: int, report_month: int):
+    """Generate incidence report and archive files by year/month"""
+    
+    # --- Generate numerator and denominator data ---
+    numerator = combined_df(numerator_extraction, report_year-1, report_year)
+    denominator = combined_df(denominator_extraction, report_year-1, report_year)
 
+    # --- Define paths ---
+    report_filename = "incidence_complication.xlsx"
+    report_path = f"{config.SERVER_PATH}/sxcomp/{report_filename}"
 
-def run_incidence_report(report_year):
-    """Function to run all scripts"""
-    numerator=combined_df(numerator_extraction, report_year-1,report_year)
-    denominator=combined_df(denominator_extraction, report_year-1,report_year)
-    dashboard_data=create_dashboard_data(numerator, denominator, dashboard_data_path)
-    bi_data=filter_last_12_months(dashboard_data)
-    bi_data=process_bi_data(bi_data)
-    bi_data.to_excel(bi_report_path,index=False)
+    bi_report_filename = "sx_comp_bi_report.xlsx"
+    bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
+
+    dashboard_filename = "SurgicalComplicationsDashboard.xlsx"
+    dashboard_path = f"{config.SERVER_PATH}/sxcomp/{dashboard_filename}"
+
+    dashboard_data_file = "incidence_complication_data.xlsx"
+    dashboard_data_path = f"{config.SERVER_PATH}/sxcomp/{dashboard_data_file}"
+
+    # --- Create dashboard data ---
+    dashboard_data = create_dashboard_data(numerator, denominator, dashboard_data_path)
+
+    # --- Generate BI data ---
+    bi_data = filter_last_12_months(dashboard_data, report_year, "SurgeryDate")
+    bi_data = process_bi_data(bi_data)
+    bi_data.to_excel(bi_report_path, index=False)
+
+    # --- Save main report ---
     save_to_excel(numerator, denominator, report_path)  
+
+    # --- Update dashboard ---
     update_dashboard(dashboard_path)
+
+    # --- Archive copies with year/month appended ---
+    make_archive_copy(
+        report_year,
+        report_month,
+        base_path=f"{config.SERVER_PATH}/sxcomp",
+        paths_to_copy=[report_path, dashboard_path, dashboard_data_path]
+    )
 
     return
 
 
-#start year
-start_year=datetime.today().year -1
-#Year report should end.
-end_year=datetime.today().year
-                
-#Path to report on local server
-report_filename="incidence_complication.xlsx"
-report_path=f"{config.SERVER_PATH}/sxcomp/{report_filename}"
 
-#Path to power_bi_data report on local server
-bi_report_filename="sx_comp_bi_report.xlsx"
-bi_report_path=f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
-#dashboard_path
-dashboard_filename="SurgicalComplicationsDashboard.xlsx"
-dashboard_path=f"{config.SERVER_PATH}/sxcomp/{dashboard_filename}"
-dashboard_file_data="incidence_complication_data.xlsx"
-dashboard_data_path=f"{config.SERVER_PATH}/sxcomp/{dashboard_file_data}"
+
+                

@@ -8,7 +8,7 @@ import glob
 from dateutil.relativedelta import relativedelta
 from itertools import product
 import numpy as np
-from utils.utils import update_dashboard
+from utils.utils import update_dashboard, filter_last_12_months
 from environment.settings import config
 
 
@@ -141,35 +141,6 @@ def save_to_excel(df: pd.DataFrame, local_path: str) -> None :
     
     return
 
-def filter_last_12_months(df):
-    """
-    Filters the DataFrame to include only rows where ReferenceDate is within the last 6 months.
-    Also ensures missing ReferenceDate months are filled in with zero values for visualization.
-
-    Parameters:
-        df (pd.DataFrame): Input DataFrame with 'ReferenceDate' column.
-
-    Returns:
-        pd.DataFrame: Filtered DataFrame with missing months populated.
-    """
-    # Ensure ReferenceDate is in datetime format
-    df["Date"] = pd.to_datetime(df["Date"])
-    # Get today's date normalized to midnight
-    today = pd.Timestamp.today().normalize()
-
-    # First day of the current month
-    max_date = today.replace(day=1)
-
-    # Start date = first day of the month 12 months ago
-    start_date = max_date - relativedelta(months=13)
-
-    # Filter SurgeryDate between start_date (inclusive) and max_date (exclusive)
-    mask = (df["Date"] >= start_date) & (df["Date"] < max_date)
-    df = df.loc[mask]
-
-
-    return df
-
 def process_bi_data(df):
     """
     Filters and processes surgery data to compute the percentage distribution of 'Type'
@@ -232,12 +203,12 @@ def process_bi_data(df):
     return final_df
 
 
-def get_ezyvet_report():
+def get_ezyvet_report(report_year):
     """Function to run all scripts"""
     #rename_files()
     df=extraction(animal_path, invoice_path)
     save_to_excel(df, report_path)
-    bi_raw_data=filter_last_12_months(df)
+    bi_raw_data=filter_last_12_months(df, report_year, "Date")
     bi_data=process_bi_data(bi_raw_data)
     bi_data.to_excel(bi_path,index=False)
     #os.remove(animal_path)

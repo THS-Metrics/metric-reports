@@ -8,7 +8,7 @@ from environment.settings import config
 from win32com.client import Dispatch
 
 
-def run_euthanasia_report(month, year):
+def run_euthanasia_report( year, month):
     # First day of the current month
     current_date = datetime(year, month, 1)
 

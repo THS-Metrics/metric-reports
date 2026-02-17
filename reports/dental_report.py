@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime
 import calendar
 import numpy as np
-from utils.utils import save_to_excel, update_dashboard, combined_df
+from utils.utils import save_to_excel, update_dashboard, combined_df, make_archive_copy
 from database.ms_sql_connection import fetch_query
 from environment.settings import config
 
@@ -210,25 +210,40 @@ def create_dashboard_data(numerator, denominator, path: str) -> None :
 
 
 
-
-
-def run_dental_report(report_year):
-    """Function to run all scripts"""
-    numerator=combined_df(numerator_extraction, report_year-1,report_year)
-    denominator=combined_df(denominator_extraction, report_year-1,report_year)
+def run_dental_report(report_year: int, report_month: int):
+    """Function to run all scripts and archive reports by year/month"""
+    
+    # --- Paths to reports on local server ---
+    report_filename = "dental_complication.xlsx"
+    report_path = f"{config.SERVER_PATH}/sxcomp/{report_filename}"
+    
+    dashboard_filename = "SurgicalComplicationsDashboard.xlsx"
+    dashboard_path = f"{config.SERVER_PATH}/sxcomp/{dashboard_filename}"
+    
+    dashboard_data_file = "dental_complication_data.xlsx"
+    dashboard_data_path = f"{config.SERVER_PATH}/sxcomp/{dashboard_data_file}"
+    
+    # --- Generate data ---
+    numerator = combined_df(numerator_extraction, report_year-1, report_year)
+    denominator = combined_df(denominator_extraction, report_year-1, report_year)
+    
     create_dashboard_data(numerator, denominator, dashboard_data_path)
+    
+    # --- Save report ---
     save_to_excel(numerator, denominator, report_path)
+    
+    # --- Update dashboard ---
     update_dashboard(dashboard_path)
-
+    
+    # --- Archive copies with year/month appended ---
+    make_archive_copy(
+        report_year,
+        report_month,
+        base_path=f"{config.SERVER_PATH}/sxcomp",
+        paths_to_copy=[report_path, dashboard_path, dashboard_data_path]
+    )
+    
     return
 
 
 
-#Path to report on local server
-report_filename="dental_complication.xlsx"
-report_path=f"{config.SERVER_PATH}/sxcomp/{report_filename}"
-#dashboard_path
-dashboard_filename="SurgicalComplicationsDashboard.xlsx"
-dashboard_path=f"{config.SERVER_PATH}/sxcomp/{dashboard_filename}"
-dashboard_data_file="dental_complication_data.xlsx"
-dashboard_data_path=f"{config.SERVER_PATH}/sxcomp/{dashboard_data_file}"
