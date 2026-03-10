@@ -203,12 +203,12 @@ def process_bi_data(df):
     return final_df
 
 
-def get_ezyvet_report(report_year):
+def get_ezyvet_report(report_year, report_month):
     """Function to run all scripts"""
     #rename_files()
     df=extraction(animal_path, invoice_path)
     save_to_excel(df, report_path)
-    bi_raw_data=filter_last_12_months(df, report_year, "Date")
+    bi_raw_data=filter_last_12_months(df, report_year, report_month, "Date")
     bi_data=process_bi_data(bi_raw_data)
     bi_data.to_excel(bi_path,index=False)
     #os.remove(animal_path)

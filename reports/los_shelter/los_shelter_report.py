@@ -17,8 +17,6 @@ def los_outcome_script(year: int, month: int) -> pd.DataFrame:
         -- REPORT: Total Pets that Came in Previous Month
         -- ========================================
 
-        
-
         WITH month_intake AS (
             SELECT 
                 a.AnimalID,
@@ -60,6 +58,7 @@ def los_outcome_script(year: int, month: int) -> pd.DataFrame:
                 MAX(v.tIn_DateCreated) AS IntakeDate
             FROM txnVisit v
             WHERE v.tIn_DateCreated IS NOT NULL
+            AND (v.IntakeType IN ('TransferIn', 'OwnerSurrender', '[Return]', 'Stray') OR v.IntakeType IS NULL)
               AND v.tIn_DateCreated < '{reference_date}'
             GROUP BY v.AnimalID
         ),
@@ -151,6 +150,7 @@ def los_outcome_script(year: int, month: int) -> pd.DataFrame:
             END AS Type
         FROM total_outcomed t
         LEFT JOIN foster_sum_outcomed f ON t.AnimalID = f.AnimalID
+        WHERE t.Species IN ('Cat', 'Dog')
         order by AnimalID;
         """
 
@@ -212,6 +212,8 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
             MAX(v.tIn_DateCreated) AS IntakeDate
         FROM txnVisit v
         WHERE v.tIn_DateCreated IS NOT NULL
+         AND (v.IntakeType IN ('TransferIn', 'OwnerSurrender', '[Return]', 'Stray') OR v.IntakeType IS NULL)
+         
         AND v.tIn_DateCreated < '{reference_date}'
         GROUP BY v.AnimalID
     ),
@@ -312,6 +314,7 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
         END AS Type
     FROM total_nonoutcomed t
     LEFT JOIN foster_sum_nonoutcomed f ON t.AnimalID = f.AnimalID
+    WHERE t.Species IN ('Cat', 'Dog')
     order by AnimalID;
 	
     """

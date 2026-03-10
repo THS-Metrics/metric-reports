@@ -1,19 +1,17 @@
 import pandas as pd
 from datetime import datetime
-import os
-from prefect import task
 from dateutil.relativedelta import relativedelta
 from database.ms_sql_connection import fetch_query
 from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy
 from environment.settings import config
 
 
-
-def uri_numerator(year, month): 
+def numerator(year, month): 
     """Reads query and performs calculation based on year 
     and month values"""
     #Constructs date value for first of every month
     reference_date=f'{year}-{month:02}-01'
+    print(f"num ref date: {reference_date}")
     query=f"""WITH numerator
     AS (SELECT DISTINCT
       Animal.AnimalID,
@@ -41,9 +39,9 @@ def uri_numerator(year, month):
       ON ExamCondition.ConditionID = refCondition.ConditionID
     WHERE (refSpecies.Species IN ('Cat', 'Dog'))
     AND (txnVisit.IntakeType IN ('TransferIn', 'Stray', '[Return]', 'OwnerSurrender'))
-    AND (refCondition.Condition IN ('Kennel cough','URI, feline'))
-    --URI only considered as 'occured within shelter' if occured after 3 days in shelter
-    AND DATEDIFF(DAY, txnVisit.tin_DateCreated, ExamCondition.DateCreated) BETWEEN 4 AND 365
+    AND (refCondition.Condition IN ('Diarrhea', 'Diarrhea, acute, nonspecific',
+    'Diarrhea and vomiting, acute, nonspecific'))
+    AND DATEDIFF(DAY, txnVisit.tin_DateCreated, ExamCondition.DateCreated) BETWEEN 2 AND 365
     --Checks for examdates in current month only
     AND ExamCondition.DateCreated >=  '{reference_date}' and 
     ExamCondition.DateCreated <= EOMONTH('{reference_date}')
@@ -76,12 +74,12 @@ def uri_numerator(year, month):
     
     return fetch_query(query)
 
-
-def uri_denominator(year, month): 
+def denominator(year, month): 
     """Reads query and performs calculation based on year 
     and monthvalues"""
     #Constructs date value for first of every month
     reference_date=f'{year}-{month:02}-01'
+    print(f"denom ref date: {reference_date}")
     query= f"""
 
     /*The Denominator dataset compiles information on all pets present in the shelter at the beginning of the month, 
@@ -196,10 +194,10 @@ def uri_denominator(year, month):
     AND (txnVisit.IntakeType IN ('TransferIn', 'Stray', '[Return]', 'OwnerSurrender'))
     AND (refOperationStatus.OperationStatus = 'Completed')
     AND txnVisit.tin_DateCreated >= '{reference_date}'
-    AND txnVisit.tin_DateCreated < EOMONTH('{reference_date}')),
+    AND txnVisit.tin_DateCreated <= EOMONTH('{reference_date}')),
 
     /*Intake_exclusion generates records of all animals to be excluded from intake records
-    Animals who came to the shelter and developed uri within 3 days of coming into the shelter need to be excluded*/
+    Animals who came to the shelter and developed diarrhea within one day of coming into the shelter need to be excluded*/
     intake_exclusion
     AS (SELECT
       Animal.AnimalID
@@ -217,9 +215,9 @@ def uri_denominator(year, month):
       ON ExamCondition.ConditionID = refCondition.ConditionID
     WHERE (refSpecies.Species IN ('Cat', 'Dog'))
     AND (txnVisit.IntakeType IN ('TransferIn', 'Stray', '[Return]', 'OwnerSurrender'))
-    AND (refCondition.Condition IN ('Kennel cough','URI, feline'))
-    --excludes animals that developed uri within 3 days
-    AND DATEDIFF(DAY, txnVisit.tin_DateCreated, ExamCondition.DateCreated) BETWEEN 0 AND 3
+    AND (refCondition.Condition IN ('Diarrhea', 'Diarrhea, acute, nonspecific',
+    'Diarrhea and vomiting, acute, nonspecific'))
+    AND DATEDIFF(DAY, txnVisit.tin_DateCreated, ExamCondition.DateCreated) BETWEEN 0 AND 1
     AND ExamCondition.DateCreated >= '{reference_date}'
     AND ExamCondition.DateCreated <= EOMONTH('{reference_date}'))
     /* End of CTEs for intake records data cleaning*/
@@ -269,7 +267,7 @@ def uri_denominator(year, month):
 
     /*Beginning of data cleaning for intake dataset.
     Generates dataset of all pets who came into the shelter during the month and excludes pets
-    who generated uri within 3 days of coming into the shelter.*/
+    who generated diarrhea within one day of coming into the shelter.*/
 
     SELECT
       total_intake.animalid,
@@ -288,7 +286,7 @@ def uri_denominator(year, month):
         ELSE 'Puppy'
       END AS Agegroup
     FROM Total_Intake
-    --Excludes pets who developed uri within 3 days of coming into shelter
+    --Excludes pets who developed diarrhea within one day of coming into shelter
     WHERE NOT EXISTS (SELECT
       *
     FROM intake_exclusion
@@ -301,14 +299,11 @@ def uri_denominator(year, month):
             total_intake.dateofbirth
     ORDER BY animalid
     """
-
-    
     return fetch_query(query)
 
 
 def parse_combined_data(function,report_year) -> pd.DataFrame:
     """Combines the dataframes for each year and months into a single dataframe"""
-    
     df=combined_df(function, report_year, report_year)
     try:
       df[["dateofbirth", "intakedate", "Referencedate", "examdate"]] = df[["dateofbirth", "intakedate", "Referencedate", "examdate"]].apply(
@@ -318,8 +313,7 @@ def parse_combined_data(function,report_year) -> pd.DataFrame:
         lambda x: pd.to_datetime(x).dt.date)
     return df
 
-
-def uri_chart(*,numerator, denominator, path) -> None:
+def diarrhea_chart_data(*,numerator, denominator, path) -> None:
   '''Creates harmonized records of numerators and denominators.
   This data is responsible for the dashboard building.'''
   #Creates an Outcome column specifying all numerator as infected.
@@ -335,7 +329,6 @@ def uri_chart(*,numerator, denominator, path) -> None:
     numerator[['animalid', 'species', 'Agegroup','Outcome','Intaketype', 'Referencedate']]],
     ignore_index=True
     )
-  #Assign value of 1 to real data values
   #We will assign value of 0 to virtual data values used to account for months with no incidence data
   chart_data['sum']=1
   # Creating a Referencedate range with the missing months
@@ -365,12 +358,13 @@ def uri_chart(*,numerator, denominator, path) -> None:
   return chart_data
 
 
-def process_incidence_bi_data(df):
+def process_incidence_bi_data(df, report_year, report_month):
     df['Referencedate'] = pd.to_datetime(df['Referencedate'])
     df['Month'] = df['Referencedate'].dt.to_period('M')
     grouped = df.groupby(['species', 'Month', 'Agegroup', 'Outcome'])['sum'].sum().reset_index()
     # Get current month as Period (e.g., '2025-05')
-    current_month = pd.Period(datetime.today(), freq='M')
+    # Use report year/month instead of today
+    current_month = pd.Period(f"{report_year}-{str(report_month).zfill(2)}", freq='M')
     # Remove records from the current month
     df = df[df['Month'] != current_month]
     
@@ -387,66 +381,45 @@ def process_incidence_bi_data(df):
     return pivot_df[['species', 'Month', 'Agegroup', 'infection_percent']]
 
 
-def run_uri_report(report_year: int, report_month: int):
-    """Generate URI report and archive files by year/month"""
-    
-    # --- Parse current year data ---
-    df_denom = parse_combined_data(uri_denominator, report_year)
-    df_num = parse_combined_data(uri_numerator, report_year)
 
-    # --- Parse previous year data ---
-    print("Fetching denominator data for previous year...")
-    df_denom_prev_year = parse_combined_data(uri_denominator, report_year-1)
-    print(f"Denominator data for {report_year-1} loaded. Shape: {df_denom_prev_year.shape}")
-
-    print("Fetching numerator data for previous year...")
-    df_num_prev_year = parse_combined_data(uri_numerator, report_year-1)
-    print(f"Numerator data for {report_year-1} loaded. Shape: {df_num_prev_year.shape}")
-
-    # --- Combine two-year data ---
+def run_diarrhea_report(report_year: int, report_month: int):
+    """Generate diarrhea report and archive files by year/month"""
+  
+    df_denom = parse_combined_data(denominator, report_year)
+    df_num = parse_combined_data(numerator, report_year)
+    df_denom_prev_year = parse_combined_data(denominator, report_year-1)
+    df_num_prev_year = parse_combined_data(numerator, report_year-1)
     two_year_denom = pd.concat([df_denom_prev_year, df_denom], ignore_index=True)
     two_year_num = pd.concat([df_num_prev_year, df_num], ignore_index=True)
 
     # --- Define file paths ---
-    bi_report_filename = "uri_infection_percent_bi_data.xlsx"
+    bi_report_filename = "diarrhea_infection_percent_bi_data.xlsx"
+    report_filename = "diarrhea_report_raw_data.xlsx"
+    chart_filename = "diarrhea_chart_data.xlsx"
+    dashboard_filename = "diarrhea_report.xlsx"
+
     bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
+    report_path = f"{config.SERVER_PATH}/diarrhea/{report_filename}"
+    chart_path = f"{config.SERVER_PATH}/diarrhea/{chart_filename}"
+    dashboard_path = f"{config.SERVER_PATH}/diarrhea/{dashboard_filename}"
 
-    report_filename = "uri_report.xlsx"
-    report_path = f"{config.SERVER_PATH}/uri/{report_filename}"
-
-    chart_filename = "uri_chart_data.xlsx"
-    chart_path = f"{config.SERVER_PATH}/uri/{chart_filename}"
-
-    dashboard_filename = "uri_report_dashBoard.xlsx"
-    dashboard_path = f"{config.SERVER_PATH}/uri/{dashboard_filename}"
-
-    # --- Generate BI data ---
-    bi_data = uri_chart(path=bi_report_path, numerator=two_year_num, denominator=two_year_denom)
-    bi_data = filter_last_12_months(bi_data, report_year, 'Referencedate')
-    bi_data = process_incidence_bi_data(bi_data)
+    # --- Generate Power BI data ---
+    bi_data = diarrhea_chart_data(path=bi_report_path, numerator=two_year_num, denominator=two_year_denom)
+    bi_data = filter_last_12_months(bi_data, report_year, report_month, 'Referencedate')
+    bi_data = process_incidence_bi_data(bi_data, report_year, report_month)
     bi_data.to_excel(bi_report_path, index=False)
 
     # --- Save main report ---
     save_to_excel(path=report_path, numerator=df_num, denominator=df_denom)
-
-    # --- Generate chart data ---
-    uri_chart(path=chart_path, numerator=df_num, denominator=df_denom)
-
-    # --- Update dashboard ---
+    diarrhea_chart_data(path=chart_path, numerator=df_num, denominator=df_denom)
     update_dashboard(dashboard_path)
 
-    # --- Archive copies with year/month appended ---
+    # --- Make archive copies ---
     make_archive_copy(
         report_year,
         report_month,
-        base_path=f"{config.SERVER_PATH}/uri",
-        paths_to_copy=[report_path,  chart_path, dashboard_path]
+        base_path=f"{config.SERVER_PATH}/diarrhea",
+        paths_to_copy=[report_path, chart_path, dashboard_path]
     )
 
-    return
-
-
- 
-
-
-
+    print(f"Diarrhea report generation for year {report_year} completed.")

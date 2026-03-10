@@ -10,11 +10,8 @@ from win32com.client import Dispatch
 
 def run_euthanasia_report( year, month):
     # First day of the current month
-    current_date = datetime(year, month, 1)
-
-    # First day of the previous month
-    prev_month_date = current_date - relativedelta(months=1)
-    first_day_prev_month = prev_month_date.replace(day=1)
+    first_day_current_month = datetime(year, month, 1)
+    first_day_next_month= first_day_current_month + relativedelta(months=1)
 
     query = f'''
     SELECT TOP (100) PERCENT 
@@ -33,8 +30,8 @@ def run_euthanasia_report( year, month):
         AND (dbo.txnVisit.IntakeType IN ('TransferIn', 'OwnerSurrender', 'Stray', '[Return]')) 
         AND (DATEDIFF(day, dbo.txnVisit.tin_DateCreated, dbo.Euthanasia.DateCreated) >= 4
         AND DATEDIFF(day, dbo.txnVisit.tin_DateCreated, dbo.Euthanasia.DateCreated) <= 21) AND 
-        dbo.Euthanasia.DateCreated>= '{first_day_prev_month}'
-        AND dbo.Euthanasia.DateCreated < '{current_date}'
+        dbo.Euthanasia.DateCreated>= '{first_day_current_month}'
+        AND dbo.Euthanasia.DateCreated < '{first_day_next_month}'
     ORDER BY dbo.Animal.AnimalID, IntakeDate, EuthanizedDate
     '''
 
@@ -93,7 +90,7 @@ def run_euthanasia_report( year, month):
 
 
    # File output
-    output_file_name = f"{(current_date).strftime('%b')}-delayedeuthanasia.xlsx"
+    output_file_name = f"{(first_day_current_month).strftime('%b')}-delayedeuthanasia.xlsx"
     output_path = f"{config.SERVER_PATH}/delayed_euthanasia/monthly/{output_file_name}"
 
     # Write to Excel
@@ -103,7 +100,7 @@ def run_euthanasia_report( year, month):
     # Add headers and merge cells
     wb = load_workbook(output_path)
     ws = wb['monthly']
-    ws['A1'] = f'Records for {current_date.strftime("%b-%Y")}'
+    ws['A1'] = f'Records for {first_day_current_month.strftime("%b-%Y")}'
     ws['A2'] = 'Intake to Euthanasia: 4-21 days inclusive'
     ws.merge_cells('A1:C1')
     ws.merge_cells('A2:D2')

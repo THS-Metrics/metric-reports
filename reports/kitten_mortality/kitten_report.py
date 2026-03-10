@@ -1,10 +1,9 @@
 import pandas as pd
 from datetime import datetime
 import calendar
-import os
 import numpy as np
 from dateutil.relativedelta import relativedelta
-from utils.utils import save_to_excel, update_dashboard, combined_df, make_archive_copy
+from utils.utils import save_to_excel, update_dashboard, combined_df, make_archive_copy, truncate_report_to_data_month
 from database.ms_sql_connection import fetch_query
 from environment.settings import config
 
@@ -15,8 +14,7 @@ def extraction(year: int, month: int) -> pd.DataFrame:
     #Returns Last day of the month
     #Returns Last date of the month in the format YYYY-MM-DD
     last_date=datetime.strptime(f'{year}-{month:02}-{calendar.monthrange(year, month)[1]}', '%Y-%m-%d')
-    #Reference date
-    reference_date=f'{year}-{month:02}-01'
+    last_four_months_date = last_date - relativedelta(months=3)
     
     query=f'''WITH Denom AS (SELECT  
     dbo.Animal.AnimalID, 
@@ -33,14 +31,14 @@ def extraction(year: int, month: int) -> pd.DataFrame:
            dbo.txnVisit ON dbo.Animal.AnimalID = dbo.txnVisit.AnimalID
     WHERE dbo.refSpecies.Species = 'Cat'
     --Using last_date to include Cats that had intake date in specified month
-    AND dbo.txnVisit.tin_DateCreated Between '2017-01-01' AND '{last_date}'
+    AND dbo.txnVisit.tin_DateCreated Between '{last_four_months_date}' AND '{last_date}'
     AND dbo.txnVisit.IntakeType IN ('TransferIn', 'Stray', '[Return]', 'OwnerSurrender')
-    --Excludes animals that had outcome before first day
-    AND dbo.txnVisit.tOut_DateCreated >= '{reference_date}'),
+    --Excludes animals that had outcome before after report month
+    AND dbo.txnVisit.tOut_DateCreated >= '{last_date}'),
     
     --Weeks Table from inbuilt table in SQL Server for Crossjoin 
     Weeks AS (
-    SELECT DATEADD(DAY, number,'{reference_date}') AS week_start
+    SELECT DATEADD(DAY, number,'{last_date}') AS week_start
     FROM master..spt_values
     WHERE type = 'P' AND number in(0,7,14,21,27)
     ),
@@ -70,7 +68,7 @@ def extraction(year: int, month: int) -> pd.DataFrame:
     AND (dbo.txnVisit.IntakeType IN ('TransferIn', 'Stray', '[Return]', 'OwnerSurrender'))
     AND dbo.AnimalDetails.DateOfBirth IS NOT NULL
     AND (dbo.txnVisit.OutComeType IN ('Died', 'PreEuthanasia'))
-    AND dbo.txnVisit.tin_DateCreated Between '2017-01-01' AND '{last_date}'
+    AND dbo.txnVisit.tin_DateCreated Between '{last_four_months_date}' AND '{last_date}'
     
     UNION
     
@@ -111,7 +109,7 @@ def extraction(year: int, month: int) -> pd.DataFrame:
     WHERE dbo.refSpecies.Species = 'Cat'
     AND dbo.txnVisit.IntakeType IN ('TransferIn', 'Stray', '[Return]', 'OwnerSurrender')
     AND dbo.txnVisit.OutComeType IN ('Died', 'PreEuthanasia')
-    AND dbo.txnVisit.tin_DateCreated Between '2017-01-01' AND '{last_date}'))
+    AND dbo.txnVisit.tin_DateCreated Between '{last_four_months_date}' AND '{last_date}'))
 
 
     SELECT DISTINCT
@@ -121,7 +119,7 @@ def extraction(year: int, month: int) -> pd.DataFrame:
       Dateofbirth,
       Intakedate,
       DATEDIFF(WEEK, dateofbirth, intakedate) AS IntakeAge,
-      Cast('{reference_date}' as Date) as ReferenceDate,
+      Cast('{last_date}' as Date) as ReferenceDate,
       'Alive' AS Outcometype,
       CASE
         WHEN DATEDIFF(WEEK, DAteOfBirth, week_start) BETWEEN 0 AND 2 THEN '0-2 wks'
@@ -168,7 +166,7 @@ def extraction(year: int, month: int) -> pd.DataFrame:
 
     FROM numerator
     WHERE DATEDIFF(WEEK, DateOfBirth, OutcomeDate) <= 20
-    AND outcomedate BETWEEN '{reference_date}' AND '{last_date}'
+    AND outcomedate BETWEEN '{last_four_months_date}' AND '{last_date}'
     
     '''
     
@@ -186,12 +184,13 @@ def extraction(year: int, month: int) -> pd.DataFrame:
 
     
     
-def parse_combined_df(function_name:str, start_year:int, end_year:int) -> pd.DataFrame:
+def parse_combined_df(function_name:str, start_year:int, end_year:int, max_month:int) -> pd.DataFrame:
     """Combines the dataframes for each year and months into a single dataframe"""
-    df=combined_df(function_name, start_year, end_year)
+    df=combined_df(function_name, start_year, end_year, max_month=max_month)
     # Creating a referencedate range with the missing months
     min_referencedate = df['ReferenceDate'].min()
     max_referencedate = df['ReferenceDate'].max()
+    print(max_referencedate, min_referencedate)
     referencedate_range = pd.date_range(min_referencedate, max_referencedate, freq='MS')
     # Generating the missing rows for months
     missing_rows = []
@@ -212,7 +211,7 @@ def parse_combined_df(function_name:str, start_year:int, end_year:int) -> pd.Dat
     return df
 
 
-def filter_last_12_months(df):
+def filter_last_twelve_months(df:pd.DataFrame, year:str, month:str):
     """
     Filters the DataFrame to include only rows where ReferenceDate is within the last 6 months.
     Also ensures missing ReferenceDate months are filled in with zero values for visualization.
@@ -227,14 +226,11 @@ def filter_last_12_months(df):
     df = df.copy()  # Avoid modifying the original DataFrame
     df["ReferenceDate"] = pd.to_datetime(df["ReferenceDate"])
 
-    # Get today's date normalized to midnight
-    today = pd.Timestamp.today().normalize()
-
-    # First day of the current month
-    max_date = today.replace(day=1)
+   
+    max_date = pd.Timestamp(year=year, month=int(month), day=1)
 
     # Start date = first day of the month 12 months ago
-    start_date = max_date - relativedelta(months=13)
+    start_date = max_date - relativedelta(months=12)
 
     # Filter SurgeryDate between start_date (inclusive) and max_date (exclusive)
     mask = (df["ReferenceDate"] >= start_date) & (df["ReferenceDate"] < max_date)
@@ -296,23 +292,26 @@ def run_kitten_report(report_year:int, report_month:int):
     """Run all scripts, save reports, and copy to year/month folder"""
     
     # --- Run your data processing ---
-    df = parse_combined_df(extraction, report_year, report_year)
-    power_bi_df = filter_last_12_months(df)
-    power_bi_df_summary = process_bi_data(power_bi_df)
+    df = parse_combined_df(extraction, report_year, report_year, report_month)
+    ##two_year_df= parse_combined_df(extraction, report_year-1, report_year)
+    #power_bi_df = filter_last_twelve_months(two_year_df, report_year, report_month)
+    #power_bi_df_summary = process_bi_data(power_bi_df)
+    df= truncate_report_to_data_month(df, report_year, report_month, filter_key="ReferenceDate")
     
     # --- Original report paths (unchanged) ---
     report_filename = "kitten_mortality.xlsx"
-    bi_report_filename = "kitten_mortality_bi.xlsx"
+    #bi_report_filename = "kitten_mortality_bi.xlsx"
     dashboard_filename = "Kitten_Mortality_DashBoard.xlsx"
     
     report_path = f"{config.SERVER_PATH}/kitten_mortality/{report_filename}"
-    bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
+    #bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
     dashboard_path = f"{config.SERVER_PATH}/kitten_mortality/{dashboard_filename}"
     
     # --- Save Power BI Excel ---
-    with pd.ExcelWriter(bi_report_path, engine='openpyxl') as writer:
-        power_bi_df.to_excel(writer, sheet_name='Sheet2', index=False)
-        power_bi_df_summary.to_excel(writer, sheet_name='Sheet1', index=False)
+    #with pd.ExcelWriter(bi_report_path, engine='openpyxl') as writer:
+        #power_bi_df.to_excel(writer, sheet_name='Sheet2', index=False)
+        #power_bi_df_summary.to_excel(writer, sheet_name='Sheet1', index=False)
+       # pass
     
     # --- Save mortality report ---
     df_num = df[df['Outcometype'].isin(['Died', 'Euthanised'])]

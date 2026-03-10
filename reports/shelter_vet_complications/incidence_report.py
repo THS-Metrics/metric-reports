@@ -299,7 +299,7 @@ def run_incidence_report(report_year: int, report_month: int):
     dashboard_data = create_dashboard_data(numerator, denominator, dashboard_data_path)
 
     # --- Generate BI data ---
-    bi_data = filter_last_12_months(dashboard_data, report_year, "SurgeryDate")
+    bi_data = filter_last_12_months(dashboard_data, report_year, report_month, "SurgeryDate")
     bi_data = process_bi_data(bi_data)
     bi_data.to_excel(bi_report_path, index=False)
 

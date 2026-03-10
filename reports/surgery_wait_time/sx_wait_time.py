@@ -4,7 +4,7 @@ from dateutil.relativedelta import relativedelta
 from database.ms_sql_connection import fetch_query
 from utils.utils import update_dashboard
 from environment.settings import config
-from utils.utils import update_dashboard, combined_df, filter_last_12_months, make_archive_copy
+from utils.utils import update_dashboard, combined_df, filter_last_12_months, make_archive_copy, truncate_report_to_data_month
 from datetime import datetime
 import calendar
 
@@ -255,6 +255,7 @@ def run_sx_wait_time_report(report_year: int, report_month: int):
     
     # --- Parse 3 years of data ---
     yearly = parse_combined_df(adult_extract_function=adult_extraction, start_year=report_year-2, end_year=report_year)
+    yearly=truncate_report_to_data_month(yearly, report_year, report_month, filter_key="SurgeryDate")
 
     # --- Define file paths ---
     bi_report_filename = "sx_wait_time_bi_report.xlsx"
@@ -275,9 +276,10 @@ def run_sx_wait_time_report(report_year: int, report_month: int):
     # --- Filter and save current year data ---
     adult_df = filter_current_year_data(yearly, report_year)
     adult_df.to_excel(report_path, header=True, index=False, sheet_name='Adult')
+    adult_df=truncate_report_to_data_month(adult_df, report_year, report_month, filter_key="SurgeryDate")
 
     # --- Generate BI data ---
-    bi_data = filter_last_12_months(yearly, report_year, "SurgeryDate")
+    bi_data = filter_last_12_months(yearly, report_year, report_month, "SurgeryDate")
     bi_data.to_excel(bi_report_path, index=False)
 
     # --- Update dashboard ---
