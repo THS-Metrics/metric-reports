@@ -14,7 +14,7 @@ def extraction(year: int, month: int) -> pd.DataFrame:
     #Returns Last day of the month
     #Returns Last date of the month in the format YYYY-MM-DD
     last_date=datetime.strptime(f'{year}-{month:02}-{calendar.monthrange(year, month)[1]}', '%Y-%m-%d')
-    last_four_months_date = last_date - relativedelta(months=3)
+    last_four_months_date = last_date - relativedelta(months=5)
     
     query=f'''WITH Denom AS (SELECT  
     dbo.Animal.AnimalID, 

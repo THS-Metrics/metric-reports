@@ -1,6 +1,6 @@
 import pandas as pd
 from database.ms_sql_connection import fetch_query
-from utils.utils import update_dashboard, combined_df, make_archive_copy
+from utils.utils import update_dashboard, combined_df, make_archive_copy, truncate_report_to_data_month
 from environment.settings import config
 from datetime import datetime
 import calendar
@@ -111,9 +111,15 @@ def los_outcome_script(year: int, month: int) -> pd.DataFrame:
                 hl.AnimalID,
                 rl.Location,
                 hl.LastUpdated,
-                DATEDIFF(DAY, hl.LastUpdated, 
-                        LEAD(hl.LastUpdated) OVER (PARTITION BY hl.AnimalID ORDER BY hl.LastUpdated)) AS FosterDays
-            FROM HistoryLocation hl
+                DATEDIFF(
+                        DAY,
+                        hl.LastUpdated,
+                        COALESCE(
+                            LEAD(hl.LastUpdated) OVER (PARTITION BY hl.AnimalID ORDER BY hl.LastUpdated),
+                            t.Outcomedate
+                        )
+                    ) AS FosterDays
+                    FROM HistoryLocation hl
             JOIN refLocations rl ON hl.LocationID = rl.LocationID
             JOIN total_outcomed t ON t.AnimalID = hl.AnimalID   
             WHERE hl.LastUpdated > t.IntakeDate --only fetch history between intake and last date of report
@@ -235,7 +241,8 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
             on HistoryStatus.LastUpdated=ls.stagedate
         JOIN past_intakes pi ON pi.AnimalID = ls.AnimalID
         LEFT JOIN txnVisit v ON v.AnimalID = a.AnimalID
-        WHERE v.tOut_DateCreated > '{last_date}'
+        WHERE (v.tOut_DateCreated > '{last_date}'
+                OR v.tOut_DateCreated is NULL)
             AND Species IN ('Cat', 'Dog')
     ),
 
@@ -276,9 +283,15 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
             hl.AnimalID,
             rl.Location,
             hl.LastUpdated,
-            DATEDIFF(DAY, hl.LastUpdated, 
-                    LEAD(hl.LastUpdated) OVER (PARTITION BY hl.AnimalID ORDER BY hl.LastUpdated)) AS FosterDays
-        FROM HistoryLocation hl
+            DATEDIFF(
+                        DAY,
+                        hl.LastUpdated,
+                        COALESCE(
+                            LEAD(hl.LastUpdated) OVER (PARTITION BY hl.AnimalID ORDER BY hl.LastUpdated),
+                            t.Outcomedate
+                        )
+                    ) AS FosterDays
+                FROM HistoryLocation hl
         JOIN refLocations rl ON hl.LocationID = rl.LocationID
         JOIN total_nonoutcomed t ON t.AnimalID = hl.AnimalID   
         WHERE hl.LastUpdated > t.IntakeDate --only fetch history between intake and outcome date
@@ -353,6 +366,8 @@ def run_los_report(report_year: int, report_month: int):
     # --- Parse data ---
     los_outcome_data = parse_combined_df(los_outcome_script, report_year, report_year)
     los_nonoutcome_data = parse_combined_df(los_nonoutcome_script, report_year, report_year)
+    los_outcome_data=truncate_report_to_data_month(los_outcome_data, report_year, report_month, filter_key="ReportDate")
+    los_nonoutcome_data=truncate_report_to_data_month(los_nonoutcome_data, report_year, report_month, "ReportDate")
 
     # --- Define file paths ---
     outcome_filename = "los_outcome_data.xlsx"

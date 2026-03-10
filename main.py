@@ -29,4 +29,7 @@ def run_all():
 
 
 if __name__ == "__main__":
-    run_all()
+    #run_all()
+    #run_kitten_report(2026, 1)
+    #run_kitten_report(2026,2)
+    run_los_report(2026, 1)
