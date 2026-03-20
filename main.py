@@ -11,10 +11,11 @@ from reports.los_shelter.los_shelter_report import run_los_report
 #from reports.public_vet_complications.ezyvet import get_ezyvet_report
 from datetime import datetime
 
+report_year= datetime.now().year
+#scheduled to run report for previous month
+report_month=datetime.now().month -1
 def run_all():
-    report_year= datetime.now().year
-    #scheduled to run report for previous month
-    report_month=datetime.now().month -1
+    
     run_diarrhea_report(report_year,report_month)
     run_kitten_report(report_year,report_month)
     run_parvo_report(report_year,report_month)
@@ -30,6 +31,9 @@ def run_all():
 
 if __name__ == "__main__":
     #run_all()
+    run_parvo_report(report_year,report_month)
     #run_kitten_report(2026, 1)
     #run_kitten_report(2026,2)
-    run_los_report(2026, 1)
+    #for year in range(2019, 2027):
+        #for month in range(1,13):
+            #run_los_report(year, month)

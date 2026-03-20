@@ -39,7 +39,9 @@ def parvo_numerator(year, month):
       ON ExamCondition.ConditionID = refCondition.ConditionID
     WHERE (refSpecies.Species IN ('Cat', 'Dog'))
     AND (txnVisit.IntakeType IN ('TransferIn', 'Stray', '[Return]', 'OwnerSurrender'))
-    AND (refCondition.Condition IN ('Parvovirus, canine', 'Parvovirus, feline, suspected', 'Parvovirus, feline, confirmed'))
+    AND (refCondition.Condition IN ('Parvovirus, canine', 'Parvovirus, feline, suspected', 
+    'Parvovirus, feline, confirmed', 'Panleukopenia, feline, suspected', 
+    'Panleukopenia, feline, confirmed'))
     --Parvovirus only considered as 'occured within shelter' if occured after 3 days in shelter
     AND DATEDIFF(DAY, txnVisit.tin_DateCreated, ExamCondition.DateCreated) BETWEEN 4 AND 365
     --Checks for examdates in current month only

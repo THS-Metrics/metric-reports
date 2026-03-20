@@ -23,11 +23,12 @@ def los_outcome_script(year: int, month: int) -> pd.DataFrame:
                 a.Name,
                 s.Species,
                 CAST(v.tIn_DateCreated AS DATE) AS IntakeDate,
-                CAST(v.tOut_DateCreated AS DATE) AS OutcomeDate,
+                CAST(COALESCE(v.tOut_DateCreated, ad.ReleaseDate) AS DATE) AS OutcomeDate,
                 COALESCE(v.OutComeType, 'No Outcome Yet') AS Outcome
             FROM Animal a
             JOIN refSpecies s ON a.SpeciesID = s.SpeciesID
             LEFT JOIN txnVisit v ON v.AnimalID = a.AnimalID
+            LEFT JOIN Adoption ad ON ad.AnimalID = a.AnimalID
             WHERE 
                 (v.IntakeType IN ('TransferIn', 'OwnerSurrender', '[Return]', 'Stray') OR v.IntakeType IS NULL)
                 AND v.tIn_DateCreated >= '{reference_date}'
@@ -69,7 +70,7 @@ def los_outcome_script(year: int, month: int) -> pd.DataFrame:
                 a.Name,
                 s.Species,
                 CAST(pi.IntakeDate AS DATE) AS IntakeDate,
-                CAST(v.tOut_DateCreated AS DATE) AS OutcomeDate,
+                CAST(COALESCE(v.tOut_DateCreated, ad.ReleaseDate) AS DATE) AS OutcomeDate,
                 ls.StageDate,
                 v.OutComeType AS Outcome
             FROM latest_stagedate ls
@@ -77,9 +78,10 @@ def los_outcome_script(year: int, month: int) -> pd.DataFrame:
             JOIN refSpecies s ON a.SpeciesID = s.SpeciesID
             JOIN past_intakes pi ON pi.AnimalID = ls.AnimalID
             LEFT JOIN txnVisit v ON v.AnimalID = a.AnimalID
+            LEFT JOIN Adoption ad ON ad.AnimalID = a.AnimalID
             WHERE 
-                v.tOut_DateCreated >= '{reference_date}'
-                AND v.tOut_DateCreated <= '{last_date}'
+                COALESCE(v.tOut_DateCreated, ad.ReleaseDate) >= '{reference_date}'
+                AND COALESCE(v.tOut_DateCreated, ad.ReleaseDate) <= '{last_date}'
                 AND v.OutComeType IN ('PreEuthanasia', 'Adoption', 'Died', 'ReturnToOwner', 'TransferOut')
                 AND ls.Status = 'I'
         ),
@@ -182,11 +184,12 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
             a.Name,
             s.Species,
             CAST(v.tIn_DateCreated AS DATE) AS IntakeDate,
-            v.tOut_DateCreated AS OutcomeDate,
+            CAST(COALESCE(v.tOut_DateCreated, ad.ReleaseDate) AS DATE) AS OutcomeDate,
             COALESCE(v.OutComeType, 'No Outcome Yet') AS Outcome
         FROM Animal a
         JOIN refSpecies s ON a.SpeciesID = s.SpeciesID
         LEFT JOIN txnVisit v ON v.AnimalID = a.AnimalID
+        LEFT JOIN Adoption ad ON ad.AnimalID = a.AnimalID
         WHERE 
             (v.IntakeType IN ('TransferIn', 'OwnerSurrender', '[Return]', 'Stray') OR v.IntakeType IS NULL)
             AND v.tIn_DateCreated >= '{reference_date}'
@@ -230,7 +233,7 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
             a.Name,
             s.Species,
             CAST(pi.IntakeDate AS DATE) AS IntakeDate,
-            CAST(v.tOut_DateCreated AS DATE) AS OutcomeDate,
+            CAST(COALESCE(v.tOut_DateCreated, ad.ReleaseDate) AS DATE) AS OutcomeDate,
             ls.StageDate,
             v.OutComeType AS Outcome,
             status
@@ -241,8 +244,9 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
             on HistoryStatus.LastUpdated=ls.stagedate
         JOIN past_intakes pi ON pi.AnimalID = ls.AnimalID
         LEFT JOIN txnVisit v ON v.AnimalID = a.AnimalID
-        WHERE (v.tOut_DateCreated > '{last_date}'
-                OR v.tOut_DateCreated is NULL)
+        LEFT JOIN Adoption ad ON ad.AnimalID = a.AnimalID
+        WHERE (COALESCE(v.tOut_DateCreated, ad.ReleaseDate) > '{last_date}'
+         OR COALESCE(v.tOut_DateCreated, ad.ReleaseDate) IS NULL)
             AND Species IN ('Cat', 'Dog')
     ),
 

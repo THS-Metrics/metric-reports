@@ -193,8 +193,8 @@ def make_archive_copy(report_year: int, report_month: int, base_path: str, paths
         "uri_report_dashboard.xlsx": "URI.xlsx",
         "surgicalcomplicationsdashboard.xlsx": "Surgical_Complications_Shelter.xlsx",
         "sx_dashboard.xlsx": "Surgery_Wait_Times.xlsx",
-        "ringworm_report_dashBoard.xlsx": "Ringworm.xlsx",
-        "parvovirus_report_dashBoard.xlsx": "Parvo.xlsx",
+        "ringworm_report_dashboard.xlsx": "Ringworm.xlsx",
+        "parvovirus_report_dashboard.xlsx": "Parvo.xlsx",
         "los_shelter_dashboard.xlsx": "Los_Shelter.xlsx",
         "diarrhea_report.xlsx": "Diarrhea.xlsx"
     }
