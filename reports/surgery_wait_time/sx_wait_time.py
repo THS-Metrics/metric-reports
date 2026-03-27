@@ -96,7 +96,7 @@ def adult_extraction(year: int, month: int):
         '7 wks+' AS AgeGroup,
 
         --Partition by animalid and assign row number to first item
-        --Helps us to pick 'surgery needed' as first followed by  'post op' and  'evaluate'
+        --Helps us to pick 'surgery date' as first followed by  'post op' and  'evaluate'
         ROW_NUMBER() OVER (PARTITION BY animalid, surgerycategory ORDER BY stage DESC) AS rn
       FROM cte
 

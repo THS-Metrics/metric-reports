@@ -31,6 +31,21 @@ def run_all():
 
 
 if __name__ == "__main__":
-    run_all()
+    #run_all()
+    #run_dental_report(2026,1)
+    #run_incidence_report(2026,1,False)
+    #run_kitten_report(2026, 1)
+    #run_kitten_report(2025, 12)
+    run_bi_data=False
+    for year in range(2019, 2026):
+        for month in range(1,13):
+            run_sx_wait_time_report(year, month,run_bi_data)
+            #run_incidence_report(year, month,run_bi_data)
+            #run_dental_report(year, month)
+            #run_diarrhea_report(year,month,run_bi_data )
+            #run_uri_report(year,month, run_bi_data)
+            #run_kitten_report(year,month, run_bi_data)
+            #run_sx_wait_time_report(year,month, run_bi_data)
+            pass
     
             
