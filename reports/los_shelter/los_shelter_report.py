@@ -380,7 +380,7 @@ def run_los_report(report_year: int, report_month: int):
     non_outcome_filename = "los_nonoutcome_data.xlsx"
     non_outcome_path = f"{config.SERVER_PATH}/los_in_shelter/{non_outcome_filename}"
 
-    dashboard_filename = "los_shelter_dashboard.xlsx"
+    dashboard_filename = "los_dashboard_template.xlsx"
     dashboard_path = f"{config.SERVER_PATH}/los_in_shelter/{dashboard_filename}"
 
     # --- Save normalized data ---

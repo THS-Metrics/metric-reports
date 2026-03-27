@@ -10,12 +10,9 @@ import calendar
 
 
 def adult_extraction(year: int, month: int):
-  reference_date=f'{year}-{month:02}-01'
+  first_date=f'{year}-{month:02}-01'
   #Returns Last date of the month in the format YYYY-MM-DD
   last_date=datetime.strptime(f'{year}-{month:02}-{calendar.monthrange(year, month)[1]}', '%Y-%m-%d')
-  #Reference date
-  reference_date=f'{year}-{month:02}-01'
-  print(reference_date, last_date)
   
   adult_query= f"""
     WITH SurgeryMap AS (
@@ -76,9 +73,9 @@ def adult_extraction(year: int, month: int):
     WHERE
         rs.Species IN ('Cat', 'Dog', 'Rabbit')
         AND ras.Stage IN ('Evaluate', 'Post -Op', 'Surgery Needed')
-        AND hs.LastUpdated >= '2019-01-01'
+        AND hs.LastUpdated >= '{first_date}'
         AND hs.LastUpdated <  '{last_date}'
-        AND et.StatusDateTime >= '{reference_date}'
+        AND et.StatusDateTime >= '{first_date}'
         AND et.StatusDateTime <  '{last_date}'),
 
     first_cleaned
@@ -195,9 +192,9 @@ def adult_extraction(year: int, month: int):
   
   return df
 
-def parse_combined_df(adult_extract_function, start_year, end_year) -> pd.DataFrame:
+def parse_combined_df(adult_extract_function, start_year, end_year, max_month: int) -> pd.DataFrame:
   """Combines the dataframes for each year and months into a single dataframe"""
-  df=combined_df(adult_extract_function, start_year, end_year)
+  df=combined_df(adult_extract_function, start_year, end_year, max_month)
   df['SurgeryDate'] = pd.to_datetime(df['SurgeryDate']).dt.date
 
   # Corrected filtering with parentheses and proper types
@@ -250,51 +247,42 @@ def filter_current_year_data(df, year: str):
 
 
 
-def run_sx_wait_time_report(report_year: int, report_month: int):
-    """Generate sx wait time report and archive files by year/month"""
-    
-    # --- Parse 3 years of data ---
-    yearly = parse_combined_df(adult_extract_function=adult_extraction, start_year=report_year-2, end_year=report_year)
-    yearly=truncate_report_to_data_month(yearly, report_year, report_month, filter_key="SurgeryDate")
+def run_sx_wait_time_report(report_year: int, report_month: int, run_bi_data: bool = True):
+    """Generate surgery wait time report and archive files by year/month"""
 
-    # --- Define file paths ---
-    bi_report_filename = "sx_wait_time_bi_report.xlsx"
-    bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
+    base_path = f"{config.SERVER_PATH}/sx_wait_time"
+    bi_base_path = f"{config.SERVER_PATH}/power_bi"
+    # --- File paths ---
+    files = {
+        "bi_report": f"{bi_base_path}/sx_wait_time_bi_report.xlsx",
+        "report": f"{base_path}/sx_report.xlsx",
+        "dashboard": f"{base_path}/surgery_wait_time_dashboard_template.xlsx",
+    }
 
-    report_filename = "sx_report.xlsx"
-    report_path = f"{config.SERVER_PATH}/sx_wait_time/{report_filename}"
+    # --- Filter and truncate current year data ---
+    adult_df = parse_combined_df(adult_extract_function=adult_extraction, start_year=report_year, end_year=report_year, max_month=report_month)
+    adult_df = truncate_report_to_data_month(adult_df, report_year, report_month, filter_key="SurgeryDate")
+    adult_df.to_excel(files["report"], header=True, index=False, sheet_name="Adult")
 
-    yearly_filename = "sx_yearly_report.xlsx"
-    yearly_path = f"{config.SERVER_PATH}/sx_wait_time/{yearly_filename}"
-
-    dashboard_filename = "sx_DashBoard.xlsx"
-    dashboard_path = f"{config.SERVER_PATH}/sx_wait_time/{dashboard_filename}"
-
-    # --- Save yearly report ---
-    yearly.to_excel(yearly_path, index=False)
-
-    # --- Filter and save current year data ---
-    adult_df = filter_current_year_data(yearly, report_year)
-    adult_df.to_excel(report_path, header=True, index=False, sheet_name='Adult')
-    adult_df=truncate_report_to_data_month(adult_df, report_year, report_month, filter_key="SurgeryDate")
-
-    # --- Generate BI data ---
-    bi_data = filter_last_12_months(yearly, report_year, report_month, "SurgeryDate")
-    bi_data.to_excel(bi_report_path, index=False)
+    # --- Optional BI dataset ---
+    if run_bi_data:
+        yearly = parse_combined_df(adult_extract_function=adult_extraction, start_year=report_year-2, end_year=report_year, max_month=12)
+        yearly=truncate_report_to_data_month(yearly, report_year, report_month, filter_key="SurgeryDate")
+        bi_data = filter_last_12_months(yearly, report_year, report_month, "SurgeryDate")
+        bi_data.to_excel(files["bi_report"], index=False)
 
     # --- Update dashboard ---
-    update_dashboard(dashboard_path)
+    update_dashboard(files["dashboard"])
 
-    # --- Archive copies with year/month appended ---
+    # --- Archive copies ---
     make_archive_copy(
         report_year,
         report_month,
-        base_path=f"{config.SERVER_PATH}/sx_wait_time",
-        paths_to_copy=[yearly_path, report_path, dashboard_path]
+        base_path=base_path,
+        paths_to_copy=[files["report"], files["dashboard"]],
     )
 
-    return
-
+    print(f"Surgery wait time report generation for {report_year}-{report_month:02d} completed.")
 
 
 

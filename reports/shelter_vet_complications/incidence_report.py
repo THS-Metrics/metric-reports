@@ -6,7 +6,7 @@ import numpy as np
 from itertools import product
 from dateutil.relativedelta import relativedelta
 from database.ms_sql_connection import fetch_query
-from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy
+from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy, truncate_report_to_data_month
 from environment.settings import config
 
 def denominator_extraction(year: int, month: int) -> pd.DataFrame:
@@ -275,50 +275,55 @@ def process_bi_data(df):
     return final_df
 
 
-def run_incidence_report(report_year: int, report_month: int):
+def run_incidence_report(report_year: int, report_month: int, run_bi_data: bool = True):
     """Generate incidence report and archive files by year/month"""
-    
+
+    base_path = f"{config.SERVER_PATH}/sxcomp"
+    bi_base_path = f"{config.SERVER_PATH}/power_bi"
+
     # --- Generate numerator and denominator data ---
-    numerator = combined_df(numerator_extraction, report_year-1, report_year)
-    denominator = combined_df(denominator_extraction, report_year-1, report_year)
+    numerator = combined_df(numerator_extraction, report_year, report_year, report_month)
+    denominator = combined_df(denominator_extraction, report_year, report_year, report_month)
 
-    # --- Define paths ---
-    report_filename = "incidence_complication.xlsx"
-    report_path = f"{config.SERVER_PATH}/sxcomp/{report_filename}"
+    numerator = truncate_report_to_data_month(numerator, report_year, report_month, filter_key="SurgeryDate")
+    denominator = truncate_report_to_data_month(denominator, report_year, report_month, filter_key="SurgeryDate")
 
-    bi_report_filename = "sx_comp_bi_report.xlsx"
-    bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
+    # --- Define file paths ---
+    files = {
+        "report": f"{base_path}/incidence_complication.xlsx",
+        "bi_report": f"{bi_base_path}/sx_comp_bi_report.xlsx",
+        "dashboard": f"{base_path}/surgical_comp_dashboard_template.xlsx",
+        "dashboard_data": f"{base_path}/incidence_complication_data.xlsx",
+    }
 
-    dashboard_filename = "SurgicalComplicationsDashboard.xlsx"
-    dashboard_path = f"{config.SERVER_PATH}/sxcomp/{dashboard_filename}"
+    
 
-    dashboard_data_file = "incidence_complication_data.xlsx"
-    dashboard_data_path = f"{config.SERVER_PATH}/sxcomp/{dashboard_data_file}"
-
-    # --- Create dashboard data ---
-    dashboard_data = create_dashboard_data(numerator, denominator, dashboard_data_path)
-
-    # --- Generate BI data ---
-    bi_data = filter_last_12_months(dashboard_data, report_year, report_month, "SurgeryDate")
-    bi_data = process_bi_data(bi_data)
-    bi_data.to_excel(bi_report_path, index=False)
+    # --- Optional BI dataset ---
+    if run_bi_data:
+        # --- Create dashboard data ---
+        two_year_numerator = combined_df(numerator_extraction, report_year - 1, report_year, report_month)
+        two_year_denominator = combined_df(denominator_extraction, report_year - 1, report_year, report_month)
+        dashboard_data = create_dashboard_data(two_year_numerator, two_year_denominator, files["dashboard_data"])
+        
+        bi_data = filter_last_12_months(dashboard_data, report_year, report_month, "SurgeryDate")
+        bi_data = process_bi_data(bi_data)
+        bi_data.to_excel(files["bi_report"], index=False)
 
     # --- Save main report ---
-    save_to_excel(numerator, denominator, report_path)  
+    save_to_excel(numerator, denominator, files["report"])
 
     # --- Update dashboard ---
-    update_dashboard(dashboard_path)
+    update_dashboard(files["dashboard"])
 
-    # --- Archive copies with year/month appended ---
+    # --- Archive copies ---
     make_archive_copy(
         report_year,
         report_month,
-        base_path=f"{config.SERVER_PATH}/sxcomp",
-        paths_to_copy=[report_path, dashboard_path, dashboard_data_path]
+        base_path=base_path,
+        paths_to_copy=[files["report"], files["dashboard"], files["dashboard_data"]],
     )
 
-    return
-
+    print(f"Incidence report generation for {report_year}-{report_month:02d} completed.")
 
 
 

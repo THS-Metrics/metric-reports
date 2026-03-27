@@ -1,7 +1,7 @@
 import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
-from utils.utils import save_to_excel, update_dashboard, combined_df, make_archive_copy
+from utils.utils import save_to_excel, update_dashboard, combined_df, make_archive_copy, truncate_report_to_data_month
 from environment.settings import config
 from database.ms_sql_connection import fetch_query
 
@@ -343,6 +343,9 @@ def run_parvo_report(report_year: int, report_month: int):
     # --- Parse data ---
     df_denom = parse_combined_data(parvo_denominator, report_year)
     df_num = parse_combined_data(parvo_numerator, report_year)
+    df_num=truncate_report_to_data_month(df_num, report_year, report_month, filter_key='Referencedate')
+    df_denom=truncate_report_to_data_month(df_denom, report_year, report_month, filter_key='Referencedate')
+
 
     # --- Define file paths ---
     report_filename = "parvovirus_report.xlsx"
@@ -351,7 +354,7 @@ def run_parvo_report(report_year: int, report_month: int):
     chart_filename = "parvovirus_chart_data.xlsx"
     chart_path = f"{config.SERVER_PATH}/parvo/{chart_filename}"
 
-    dashboard_filename = "parvovirus_report_dashBoard.xlsx"
+    dashboard_filename = "parvovirus_dashboard_template.xlsx"
     dashboard_path = f"{config.SERVER_PATH}/parvo/{dashboard_filename}"
 
     # --- Save report ---

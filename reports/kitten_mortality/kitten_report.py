@@ -13,6 +13,7 @@ def extraction(year: int, month: int) -> pd.DataFrame:
     """Extraction and Transformation script from SQL"""
     #Returns Last day of the month
     #Returns Last date of the month in the format YYYY-MM-DD
+    first_date=f"{year}-{month:02}-01"
     last_date=datetime.strptime(f'{year}-{month:02}-{calendar.monthrange(year, month)[1]}', '%Y-%m-%d')
     last_four_months_date = last_date - relativedelta(months=5)
     
@@ -166,7 +167,7 @@ def extraction(year: int, month: int) -> pd.DataFrame:
 
     FROM numerator
     WHERE DATEDIFF(WEEK, DateOfBirth, OutcomeDate) <= 20
-    AND outcomedate BETWEEN '{last_four_months_date}' AND '{last_date}'
+    AND (outcomedate >='{first_date}' AND outcomedate<='{last_date}')
     
     '''
     
@@ -262,19 +263,24 @@ def process_bi_data(df):
 
     # Internal function to compute deceased percentage and assign category label
     def compute_percentage(df_subset, category_label):
-        outcome_summary = (
-            df_subset.groupby(["Month", "outcome_refined"])["sum"]
-            .sum()
-            .unstack(fill_value=0)
-        )
-        outcome_summary["deceased_pct"] = (
-            outcome_summary.get("deceased", 0)
-            / (outcome_summary.get("deceased", 0) + outcome_summary.get("alive", 0))
-        ).fillna(0) * 100
+      outcome_summary = (
+          df_subset.groupby(["Month", "outcome_refined"])["sum"]
+          .sum()
+          .unstack(fill_value=0)
+      )
 
-        result = outcome_summary.reset_index()[["Month", "deceased_pct"]]
-        result["AgeGroupCategory"] = category_label
-        return result
+      # Ensure both columns exist
+      for col in ["deceased", "alive"]:
+          if col not in outcome_summary.columns:
+              outcome_summary[col] = 0
+
+      # Calculate deceased percentage safely
+      total = outcome_summary["deceased"] + outcome_summary["alive"]
+      outcome_summary["deceased_pct"] = np.where(total == 0, 0, (outcome_summary["deceased"] / total) * 100)
+
+      result = outcome_summary.reset_index()[["Month", "deceased_pct"]]
+      result["AgeGroupCategory"] = category_label
+      return result
 
     # Apply percentage calculation for both age groups
     below_2_result = compute_percentage(df_below_2, "0-2 wks")
@@ -288,43 +294,54 @@ def process_bi_data(df):
 
 
 
-def run_kitten_report(report_year:int, report_month:int):
-    """Run all scripts, save reports, and copy to year/month folder"""
-    
-    # --- Run your data processing ---
+def run_kitten_report(report_year: int, report_month: int, run_bi_data: bool = True):
+    """Generate kitten mortality report and archive files by year/month"""
+
+    base_path = f"{config.SERVER_PATH}/kitten_mortality"
+    bi_base_path = f"{config.SERVER_PATH}/power_bi"
+
+    # --- Load and truncate data ---
     df = parse_combined_df(extraction, report_year, report_year, report_month)
-    ##two_year_df= parse_combined_df(extraction, report_year-1, report_year)
-    #power_bi_df = filter_last_twelve_months(two_year_df, report_year, report_month)
-    #power_bi_df_summary = process_bi_data(power_bi_df)
-    df= truncate_report_to_data_month(df, report_year, report_month, filter_key="ReferenceDate")
-    
-    # --- Original report paths (unchanged) ---
-    report_filename = "kitten_mortality.xlsx"
-    #bi_report_filename = "kitten_mortality_bi.xlsx"
-    dashboard_filename = "Kitten_Mortality_DashBoard.xlsx"
-    
-    report_path = f"{config.SERVER_PATH}/kitten_mortality/{report_filename}"
-    #bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
-    dashboard_path = f"{config.SERVER_PATH}/kitten_mortality/{dashboard_filename}"
-    
-    # --- Save Power BI Excel ---
-    #with pd.ExcelWriter(bi_report_path, engine='openpyxl') as writer:
-        #power_bi_df.to_excel(writer, sheet_name='Sheet2', index=False)
-        #power_bi_df_summary.to_excel(writer, sheet_name='Sheet1', index=False)
-       # pass
-    
+    df = truncate_report_to_data_month(df, report_year, report_month, filter_key="ReferenceDate")
+
+    # --- File paths ---
+    files = {
+        "report": f"{base_path}/kitten_mortality.xlsx",
+        "dashboard": f"{base_path}/kitten_mortality_dashboard_template.xlsx",
+        "bi_report": f"{bi_base_path}/kitten_mortality_bi.xlsx",
+    }
+
+    # --- Mortality subset ---
+    df_num = df[df["Outcometype"].isin(["Died", "Euthanised"])]
+
+    # --- Optional Power BI dataset ---
+    if run_bi_data:
+        two_year_df = parse_combined_df(extraction, report_year - 1, report_year, report_month)
+        two_year_df = truncate_report_to_data_month(
+            two_year_df, report_year, report_month, filter_key="ReferenceDate"
+        )
+
+        power_bi_df = filter_last_twelve_months(two_year_df, report_year, report_month)
+        power_bi_df_summary = process_bi_data(power_bi_df)
+
+        with pd.ExcelWriter(files["bi_report"], engine="openpyxl") as writer:
+            power_bi_df.to_excel(writer, sheet_name="Sheet2", index=False)
+            power_bi_df_summary.to_excel(writer, sheet_name="Sheet1", index=False)
+
     # --- Save mortality report ---
-    df_num = df[df['Outcometype'].isin(['Died', 'Euthanised'])]
-    save_to_excel(df_num, df, report_path)
-    
+    save_to_excel(df_num, df, files["report"])
+
     # --- Update dashboard ---
-    update_dashboard(dashboard_path)
-    #make archive copies
-    make_archive_copy(report_year, report_month,base_path=f"{config.SERVER_PATH}/kitten_mortality", paths_to_copy=[report_path, dashboard_path] )
-    
-    
-    
-    return
+    update_dashboard(files["dashboard"])
+
+    # --- Archive copies ---
+    make_archive_copy(
+        report_year,
+        report_month,
+        base_path=base_path,
+        paths_to_copy=[files["report"], files["dashboard"]],
+    )
+    print(f"Kitten Mortality report generation for {report_year}-{report_month:02d} completed.")
 
 
 

@@ -2,7 +2,7 @@ import pandas as pd
 from datetime import datetime
 import calendar
 import numpy as np
-from utils.utils import save_to_excel, update_dashboard, combined_df, make_archive_copy
+from utils.utils import save_to_excel, update_dashboard, combined_df, make_archive_copy, truncate_report_to_data_month
 from database.ms_sql_connection import fetch_query
 from environment.settings import config
 
@@ -217,15 +217,18 @@ def run_dental_report(report_year: int, report_month: int):
     report_filename = "dental_complication.xlsx"
     report_path = f"{config.SERVER_PATH}/sxcomp/{report_filename}"
     
-    dashboard_filename = "SurgicalComplicationsDashboard.xlsx"
+    dashboard_filename = "surgical_comp_dashboard_template.xlsx"
     dashboard_path = f"{config.SERVER_PATH}/sxcomp/{dashboard_filename}"
     
     dashboard_data_file = "dental_complication_data.xlsx"
     dashboard_data_path = f"{config.SERVER_PATH}/sxcomp/{dashboard_data_file}"
     
     # --- Generate data ---
-    numerator = combined_df(numerator_extraction, report_year-1, report_year)
-    denominator = combined_df(denominator_extraction, report_year-1, report_year)
+    numerator = combined_df(numerator_extraction, report_year, report_year, report_month)
+    denominator = combined_df(denominator_extraction, report_year, report_year, report_month)
+    numerator=truncate_report_to_data_month(numerator, report_year, report_month, filter_key='SurgeryDate')
+    denominator=truncate_report_to_data_month(denominator, report_year, report_month, filter_key='SurgeryDate')
+
     
     create_dashboard_data(numerator, denominator, dashboard_data_path)
     

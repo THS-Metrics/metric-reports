@@ -187,16 +187,16 @@ def make_archive_copy(report_year: int, report_month: int, base_path: str, paths
     os.makedirs(archive_folder, exist_ok=True)
     os.makedirs(dashboard_archive_folder, exist_ok=True)
 
-    # Mapping of old_name to new_name
+    # Mapping of old_name to Teams Friendly UI Name
     filename_mapping = {
-        "kitten_mortality_dashboard.xlsx": "Kitten_Mortality.xlsx",
-        "uri_report_dashboard.xlsx": "URI.xlsx",
-        "surgicalcomplicationsdashboard.xlsx": "Surgical_Complications_Shelter.xlsx",
-        "sx_dashboard.xlsx": "Surgery_Wait_Times.xlsx",
-        "ringworm_report_dashboard.xlsx": "Ringworm.xlsx",
-        "parvovirus_report_dashboard.xlsx": "Parvo.xlsx",
-        "los_shelter_dashboard.xlsx": "Los_Shelter.xlsx",
-        "diarrhea_report.xlsx": "Diarrhea.xlsx"
+        "kitten_mortality_dashboard_template.xlsx": "Kitten_Mortality.xlsx",
+        "uri_dashboard_template.xlsx": "URI.xlsx",
+        "surgical_comp_dashboard_template.xlsx": "Surgical_Complications_Shelter.xlsx",
+        "surgery_wait_time_dashboard_template.xlsx": "Surgery_Wait_Times.xlsx",
+        "ringworm_dashboard_template.xlsx": "Ringworm.xlsx",
+        "parvovirus_dashboard_template.xlsx": "Parvo.xlsx",
+        "los_dashboard_template.xlsx": "Los_Shelter.xlsx",
+        "diarrhea_dashboard_template.xlsx": "Diarrhea.xlsx"
     }
 
     # --- Copy each file ---

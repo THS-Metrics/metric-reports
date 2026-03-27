@@ -2,8 +2,9 @@ import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from database.ms_sql_connection import fetch_query
-from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy
+from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy, truncate_report_to_data_month
 from environment.settings import config
+import calendar
 
 
 def numerator(year, month): 
@@ -375,6 +376,11 @@ def process_incidence_bi_data(df, report_year, report_month):
         fill_value=0
     ).reset_index()
     
+    # Ensure required columns exist
+    for col in ['Infected', 'Healthy']:
+        if col not in pivot_df.columns:
+            pivot_df[col] = 0
+    
     pivot_df['infection_percent'] = pivot_df['Infected'] / pivot_df['Healthy']
     pivot_df['infection_percent'] = (pivot_df['infection_percent'] * 100).round(2)
     
@@ -382,44 +388,73 @@ def process_incidence_bi_data(df, report_year, report_month):
 
 
 
-def run_diarrhea_report(report_year: int, report_month: int):
+def run_diarrhea_report(report_year: int, report_month: int, run_bi_data: bool = True):
     """Generate diarrhea report and archive files by year/month"""
-  
-    df_denom = parse_combined_data(denominator, report_year)
-    df_num = parse_combined_data(numerator, report_year)
-    df_denom_prev_year = parse_combined_data(denominator, report_year-1)
-    df_num_prev_year = parse_combined_data(numerator, report_year-1)
-    two_year_denom = pd.concat([df_denom_prev_year, df_denom], ignore_index=True)
-    two_year_num = pd.concat([df_num_prev_year, df_num], ignore_index=True)
 
-    # --- Define file paths ---
-    bi_report_filename = "diarrhea_infection_percent_bi_data.xlsx"
-    report_filename = "diarrhea_report_raw_data.xlsx"
-    chart_filename = "diarrhea_chart_data.xlsx"
-    dashboard_filename = "diarrhea_report.xlsx"
+    base_path = f"{config.SERVER_PATH}/diarrhea"
+    bi_base_path = f"{config.SERVER_PATH}/power_bi"
 
-    bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
-    report_path = f"{config.SERVER_PATH}/diarrhea/{report_filename}"
-    chart_path = f"{config.SERVER_PATH}/diarrhea/{chart_filename}"
-    dashboard_path = f"{config.SERVER_PATH}/diarrhea/{dashboard_filename}"
+    def load_and_truncate(data_source, year):
+        df = parse_combined_data(data_source, year)
+        return truncate_report_to_data_month(df, report_year, report_month, filter_key="Referencedate")
 
-    # --- Generate Power BI data ---
-    bi_data = diarrhea_chart_data(path=bi_report_path, numerator=two_year_num, denominator=two_year_denom)
-    bi_data = filter_last_12_months(bi_data, report_year, report_month, 'Referencedate')
-    bi_data = process_incidence_bi_data(bi_data, report_year, report_month)
-    bi_data.to_excel(bi_report_path, index=False)
+    
+    # --- Current year data ---
+    df_denom = load_and_truncate(denominator, report_year)
+    df_num = load_and_truncate(numerator, report_year)
+    
+    # --- File paths ---
+    files = {
+        "bi_report": f"{bi_base_path}/diarrhea_infection_percent_bi_data.xlsx",
+        "report": f"{base_path}/diarrhea_report_raw_data.xlsx",
+        "chart": f"{base_path}/diarrhea_chart_data.xlsx",
+        "dashboard": f"{base_path}/diarrhea_dashboard_template.xlsx",
+    }
 
-    # --- Save main report ---
-    save_to_excel(path=report_path, numerator=df_num, denominator=df_denom)
-    diarrhea_chart_data(path=chart_path, numerator=df_num, denominator=df_denom)
-    update_dashboard(dashboard_path)
+    # --- Generate Power BI dataset ---
+    if run_bi_data:
+        # --- Previous year data ---
+        df_denom_prev = parse_combined_data(denominator, report_year - 1)
+        df_num_prev = parse_combined_data(numerator, report_year - 1)
 
-    # --- Make archive copies ---
+        two_year_denom = truncate_report_to_data_month(
+            pd.concat([df_denom_prev, df_denom], ignore_index=True),
+            report_year, report_month, filter_key="Referencedate"
+        )
+
+        two_year_num = truncate_report_to_data_month(
+            pd.concat([df_num_prev, df_num], ignore_index=True),
+            report_year, report_month, filter_key="Referencedate"
+        )
+
+        bi_data = diarrhea_chart_data(
+            path=files["bi_report"],
+            numerator=two_year_num,
+            denominator=two_year_denom
+        )
+
+        bi_data = filter_last_12_months(bi_data, report_year, report_month, "Referencedate")
+        bi_data = process_incidence_bi_data(bi_data, report_year, report_month)
+
+        bi_data.to_excel(files["bi_report"], index=False)
+
+    # --- Main report outputs ---
+    save_to_excel(path=files["report"], numerator=df_num, denominator=df_denom)
+
+    diarrhea_chart_data(
+        path=files["chart"],
+        numerator=df_num,
+        denominator=df_denom
+    )
+
+    update_dashboard(files["dashboard"])
+
+    # --- Archive copies ---
     make_archive_copy(
         report_year,
         report_month,
-        base_path=f"{config.SERVER_PATH}/diarrhea",
-        paths_to_copy=[report_path, chart_path, dashboard_path]
+        base_path=base_path,
+        paths_to_copy=[files["report"], files["chart"], files["dashboard"]],
     )
 
-    print(f"Diarrhea report generation for year {report_year} completed.")
+    print(f"Diarrhea report generation for {report_year}-{report_month:02d} completed.")

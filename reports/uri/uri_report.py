@@ -4,7 +4,7 @@ import os
 from prefect import task
 from dateutil.relativedelta import relativedelta
 from database.ms_sql_connection import fetch_query
-from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy
+from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy, truncate_report_to_data_month
 from environment.settings import config
 
 
@@ -365,12 +365,13 @@ def uri_chart(*,numerator, denominator, path) -> None:
   return chart_data
 
 
-def process_incidence_bi_data(df):
+def process_incidence_bi_data(df, report_year, report_month):
     df['Referencedate'] = pd.to_datetime(df['Referencedate'])
     df['Month'] = df['Referencedate'].dt.to_period('M')
     grouped = df.groupby(['species', 'Month', 'Agegroup', 'Outcome'])['sum'].sum().reset_index()
     # Get current month as Period (e.g., '2025-05')
-    current_month = pd.Period(datetime.today(), freq='M')
+    # Use report year/month instead of today
+    current_month = pd.Period(f"{report_year}-{str(report_month).zfill(2)}", freq='M')
     # Remove records from the current month
     df = df[df['Month'] != current_month]
     
@@ -381,72 +382,88 @@ def process_incidence_bi_data(df):
         fill_value=0
     ).reset_index()
     
+    # Ensure required columns exist
+    for col in ['Infected', 'Healthy']:
+        if col not in pivot_df.columns:
+            pivot_df[col] = 0
+    
     pivot_df['infection_percent'] = pivot_df['Infected'] / pivot_df['Healthy']
     pivot_df['infection_percent'] = (pivot_df['infection_percent'] * 100).round(2)
     
     return pivot_df[['species', 'Month', 'Agegroup', 'infection_percent']]
 
 
-def run_uri_report(report_year: int, report_month: int):
+def run_uri_report(report_year: int, report_month: int, run_bi_data: bool = True):
     """Generate URI report and archive files by year/month"""
-    
-    # --- Parse current year data ---
-    df_denom = parse_combined_data(uri_denominator, report_year)
-    df_num = parse_combined_data(uri_numerator, report_year)
 
-    # --- Parse previous year data ---
-    print("Fetching denominator data for previous year...")
-    df_denom_prev_year = parse_combined_data(uri_denominator, report_year-1)
-    print(f"Denominator data for {report_year-1} loaded. Shape: {df_denom_prev_year.shape}")
+    base_path = f"{config.SERVER_PATH}/uri"
+    bi_base_path = f"{config.SERVER_PATH}/power_bi"
 
-    print("Fetching numerator data for previous year...")
-    df_num_prev_year = parse_combined_data(uri_numerator, report_year-1)
-    print(f"Numerator data for {report_year-1} loaded. Shape: {df_num_prev_year.shape}")
+    def load_and_truncate(data_source, year):
+        df = parse_combined_data(data_source, year)
+        return truncate_report_to_data_month(df, report_year, report_month, filter_key="Referencedate")
 
-    # --- Combine two-year data ---
-    two_year_denom = pd.concat([df_denom_prev_year, df_denom], ignore_index=True)
-    two_year_num = pd.concat([df_num_prev_year, df_num], ignore_index=True)
+    # --- Current year data ---
+    df_denom = load_and_truncate(uri_denominator, report_year)
+    df_num = load_and_truncate(uri_numerator, report_year)
 
-    # --- Define file paths ---
-    bi_report_filename = "uri_infection_percent_bi_data.xlsx"
-    bi_report_path = f"{config.SERVER_PATH}/power_bi/{bi_report_filename}"
+   
 
-    report_filename = "uri_report.xlsx"
-    report_path = f"{config.SERVER_PATH}/uri/{report_filename}"
+    # --- File paths ---
+    files = {
+        "bi_report": f"{bi_base_path}/uri_infection_percent_bi_data.xlsx",
+        "report": f"{base_path}/uri_report.xlsx",
+        "chart": f"{base_path}/uri_chart_data.xlsx",
+        "dashboard": f"{base_path}/uri_dashboard_template.xlsx",
+    }
 
-    chart_filename = "uri_chart_data.xlsx"
-    chart_path = f"{config.SERVER_PATH}/uri/{chart_filename}"
+    # --- Generate Power BI dataset ---
+    if run_bi_data:
+       # --- Previous year data ---
+        df_denom_prev = parse_combined_data(uri_denominator, report_year - 1)
+        df_num_prev = parse_combined_data(uri_numerator, report_year - 1)
 
-    dashboard_filename = "uri_report_dashBoard.xlsx"
-    dashboard_path = f"{config.SERVER_PATH}/uri/{dashboard_filename}"
+        two_year_denom = truncate_report_to_data_month(
+            pd.concat([df_denom_prev, df_denom], ignore_index=True),
+            report_year, report_month, filter_key="Referencedate"
+        )
 
-    # --- Generate BI data ---
-    bi_data = uri_chart(path=bi_report_path, numerator=two_year_num, denominator=two_year_denom)
-    bi_data = filter_last_12_months(bi_data, report_year, report_month, 'Referencedate')
-    bi_data = process_incidence_bi_data(bi_data)
-    bi_data.to_excel(bi_report_path, index=False)
+        two_year_num = truncate_report_to_data_month(
+            pd.concat([df_num_prev, df_num], ignore_index=True),
+            report_year, report_month, filter_key="Referencedate"
+        )
+        bi_data = uri_chart(
+            path=files["bi_report"],
+            numerator=two_year_num,
+            denominator=two_year_denom
+        )
 
-    # --- Save main report ---
-    save_to_excel(path=report_path, numerator=df_num, denominator=df_denom)
+        bi_data = filter_last_12_months(bi_data, report_year, report_month, "Referencedate")
+        bi_data = process_incidence_bi_data(bi_data, report_year, report_month)
 
-    # --- Generate chart data ---
-    uri_chart(path=chart_path, numerator=df_num, denominator=df_denom)
+        bi_data.to_excel(files["bi_report"], index=False)
+
+    # --- Main report ---
+    save_to_excel(path=files["report"], numerator=df_num, denominator=df_denom)
+
+    # --- Chart data ---
+    uri_chart(
+        path=files["chart"],
+        numerator=df_num,
+        denominator=df_denom
+    )
 
     # --- Update dashboard ---
-    update_dashboard(dashboard_path)
+    update_dashboard(files["dashboard"])
 
-    # --- Archive copies with year/month appended ---
+    # --- Archive copies ---
     make_archive_copy(
         report_year,
         report_month,
-        base_path=f"{config.SERVER_PATH}/uri",
-        paths_to_copy=[report_path,  chart_path, dashboard_path]
+        base_path=base_path,
+        paths_to_copy=[files["report"], files["chart"], files["dashboard"]],
     )
-
-    return
-
-
- 
+    print(f"URI report generation for {report_year}-{report_month:02d} completed.")
 
 
 
