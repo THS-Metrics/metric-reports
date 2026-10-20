@@ -12,14 +12,15 @@ from database.db_sync import update_db
 
 
 def run_all(report_year: int, report_month: int, update_power_bi: bool):
-    run_diarrhea_report(report_year, report_month)
-    run_kitten_report(report_year, report_month)
+    update_db()
+    run_diarrhea_report(report_year, report_month, run_bi_data=update_power_bi)
+    run_kitten_report(report_year, report_month, run_bi_data=update_power_bi)
     run_parvo_report(report_year, report_month)
-    run_incidence_report(report_year, report_month)
+    run_incidence_report(report_year, report_month, run_bi_data=update_power_bi)
     run_ringworm_report(report_year, report_month)
-    run_uri_report(report_year, report_month)
+    run_uri_report(report_year, report_month, run_bi_data=update_power_bi)
     run_los_report(report_year, report_month)
-    run_sx_wait_time_report(report_year, report_month)
+    run_sx_wait_time_report(report_year, report_month, run_bi_data=update_power_bi)
     run_euthanasia_report(report_year, report_month)
 
 
@@ -29,8 +30,8 @@ if __name__ == "__main__":
     report_year = 2026
     report_month = 9
     update_power_bi = True
-    update_database = True
-    if update_database:
-        update_db()
-
-    run_euthanasia_report(report_year, report_month)
+    run_all(
+        report_year=report_year,
+        report_month=report_month,
+        update_power_bi=update_power_bi,
+    )
