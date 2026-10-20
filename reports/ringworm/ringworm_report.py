@@ -327,6 +327,7 @@ def ringworm_chart(*,numerator, denominator, path) -> None:
     numerator[['animalid', 'species', 'Agegroup','Outcome','Intaketype', 'Referencedate']]],
     ignore_index=True
     )
+  chart_data['Referencedate']=pd.to_datetime(chart_data['Referencedate'])
   chart_data['sum']=1
     # Creating a Referencedate range with the missing months
   min_Referencedate = chart_data['Referencedate'].min()

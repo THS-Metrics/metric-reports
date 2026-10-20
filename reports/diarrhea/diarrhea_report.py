@@ -1,10 +1,7 @@
 import pandas as pd
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
 from database.ms_sql_connection import fetch_query
 from utils.utils import save_to_excel, update_dashboard, combined_df, filter_last_12_months, make_archive_copy, truncate_report_to_data_month
 from environment.settings import config
-import calendar
 
 
 def numerator(year, month): 
@@ -314,7 +311,7 @@ def parse_combined_data(function,report_year) -> pd.DataFrame:
         lambda x: pd.to_datetime(x).dt.date)
     return df
 
-def diarrhea_chart_data(*,numerator, denominator, path) -> None:
+def diarrhea_chart_data(numerator, denominator, path) -> None:
   '''Creates harmonized records of numerators and denominators.
   This data is responsible for the dashboard building.'''
   #Creates an Outcome column specifying all numerator as infected.
@@ -330,6 +327,7 @@ def diarrhea_chart_data(*,numerator, denominator, path) -> None:
     numerator[['animalid', 'species', 'Agegroup','Outcome','Intaketype', 'Referencedate']]],
     ignore_index=True
     )
+  chart_data['Referencedate']=pd.to_datetime(chart_data['Referencedate'])
   #We will assign value of 0 to virtual data values used to account for months with no incidence data
   chart_data['sum']=1
   # Creating a Referencedate range with the missing months
@@ -417,15 +415,9 @@ def run_diarrhea_report(report_year: int, report_month: int, run_bi_data: bool =
         df_denom_prev = parse_combined_data(denominator, report_year - 1)
         df_num_prev = parse_combined_data(numerator, report_year - 1)
 
-        two_year_denom = truncate_report_to_data_month(
-            pd.concat([df_denom_prev, df_denom], ignore_index=True),
-            report_year, report_month, filter_key="Referencedate"
-        )
+        two_year_denom = pd.concat([df_denom_prev, df_denom], ignore_index=True)
 
-        two_year_num = truncate_report_to_data_month(
-            pd.concat([df_num_prev, df_num], ignore_index=True),
-            report_year, report_month, filter_key="Referencedate"
-        )
+        two_year_num = pd.concat([df_num_prev, df_num], ignore_index=True)
 
         bi_data = diarrhea_chart_data(
             path=files["bi_report"],

@@ -3,21 +3,29 @@ from datetime import datetime
 import calendar
 import numpy as np
 from dateutil.relativedelta import relativedelta
-from utils.utils import save_to_excel, update_dashboard, combined_df, make_archive_copy, truncate_report_to_data_month
+from utils.utils import (
+    save_to_excel,
+    update_dashboard,
+    combined_df,
+    make_archive_copy,
+    truncate_report_to_data_month,
+    filter_last_12_months,
+)
 from database.ms_sql_connection import fetch_query
 from environment.settings import config
 
 
-
 def extraction(year: int, month: int) -> pd.DataFrame:
     """Extraction and Transformation script from SQL"""
-    #Returns Last day of the month
-    #Returns Last date of the month in the format YYYY-MM-DD
-    first_date=f"{year}-{month:02}-01"
-    last_date=datetime.strptime(f'{year}-{month:02}-{calendar.monthrange(year, month)[1]}', '%Y-%m-%d')
+    # Returns Last day of the month
+    # Returns Last date of the month in the format YYYY-MM-DD
+    first_date = f"{year}-{month:02}-01"
+    last_date = datetime.strptime(
+        f"{year}-{month:02}-{calendar.monthrange(year, month)[1]}", "%Y-%m-%d"
+    )
     last_four_months_date = last_date - relativedelta(months=5)
-    
-    query=f'''WITH Denom AS (SELECT  
+
+    query = f"""WITH Denom AS (SELECT  
     dbo.Animal.AnimalID, 
     dbo.Animal.Name, 
     dbo.txnVisit.IntakeType as IntakeType,
@@ -169,79 +177,64 @@ def extraction(year: int, month: int) -> pd.DataFrame:
     WHERE DATEDIFF(WEEK, DateOfBirth, OutcomeDate) <= 20
     AND (outcomedate >='{first_date}' AND outcomedate<='{last_date}')
     
-    '''
-    
-    #converts query to dataframe
-    df=fetch_query(query)
-    #changes strings to datetime dtypes
-    df[["Dateofbirth", "Intakedate", "ReferenceDate"]] = df[["Dateofbirth", "Intakedate", "ReferenceDate"]].apply(
-        lambda x: pd.to_datetime(x).dt.date)
-    #Remove occurences where there are 2 same agegroups for outcome type
-    #E.g same agegroup for a kitten died and alive thus causing duplicate
-    #Deletes Alive row for such occurences
-    df=df.drop_duplicates(subset=['Animalid','Agegroup'], keep='last')
+    """
+
+    # converts query to dataframe
+    df = fetch_query(query)
+    # changes strings to datetime dtypes
+    df[["Dateofbirth", "Intakedate", "ReferenceDate"]] = df[
+        ["Dateofbirth", "Intakedate", "ReferenceDate"]
+    ].apply(lambda x: pd.to_datetime(x).dt.date)
+    # Remove occurences where there are 2 same agegroups for outcome type
+    # E.g same agegroup for a kitten died and alive thus causing duplicate
+    # Deletes Alive row for such occurences
+    df = df.drop_duplicates(subset=["Animalid", "Agegroup"], keep="last")
 
     return df
 
-    
-    
-def parse_combined_df(function_name:str, start_year:int, end_year:int, max_month:int) -> pd.DataFrame:
+
+def parse_combined_df(
+    function_name: str, start_year: int, end_year: int, max_month: int
+) -> pd.DataFrame:
     """Combines the dataframes for each year and months into a single dataframe"""
-    df=combined_df(function_name, start_year, end_year, max_month=max_month)
+    df = combined_df(function_name, start_year, end_year, max_month=max_month)
     # Creating a referencedate range with the missing months
-    min_referencedate = df['ReferenceDate'].min()
-    max_referencedate = df['ReferenceDate'].max()
+    min_referencedate = df["ReferenceDate"].min()
+    max_referencedate = df["ReferenceDate"].max()
     print(max_referencedate, min_referencedate)
-    referencedate_range = pd.date_range(min_referencedate, max_referencedate, freq='MS')
+    referencedate_range = pd.date_range(min_referencedate, max_referencedate, freq="MS")
     # Generating the missing rows for months
     missing_rows = []
-    unique_age_groups=["0-2 wks", "3-6 wks", "7-12 wks", "13-20 wks"]
+    unique_age_groups = ["0-2 wks", "3-6 wks", "7-12 wks", "13-20 wks"]
     for AgeGroup in unique_age_groups:
-      existing_referencedates = df[df['Agegroup'] == AgeGroup]['ReferenceDate']
-      missing_referencedates = set(referencedate_range) - set(existing_referencedates)
-      for referencedate in missing_referencedates:
-          for missing_outcome in ["Alive", "Died", "Euthanised"]:
-            missing_rows.append({'ReferenceDate': referencedate, 'Agegroup': AgeGroup, "Outcometype": missing_outcome})
+        existing_referencedates = df[df["Agegroup"] == AgeGroup]["ReferenceDate"]
+        missing_referencedates = set(referencedate_range) - set(existing_referencedates)
+        for referencedate in missing_referencedates:
+            for missing_outcome in ["Alive", "Died", "Euthanised"]:
+                missing_rows.append(
+                    {
+                        "ReferenceDate": referencedate,
+                        "Agegroup": AgeGroup,
+                        "Outcometype": missing_outcome,
+                    }
+                )
     # Convert missing rows to DataFrame before concatenating
     missing_df = pd.DataFrame(missing_rows)
     # Appending the missing rows to the DataFrame
     df = pd.concat([df, missing_df], ignore_index=True)
-    #Sorting the DataFrame by referencedate and AgeGroup
-    df = df.sort_values(by=['Animalid']).reset_index(drop=True)
-    
+    # Sorting the DataFrame by referencedate and AgeGroup
+    df = df.sort_values(by=["Animalid"]).reset_index(drop=True)
+
     return df
 
 
-def filter_last_twelve_months(df:pd.DataFrame, year:str, month:str):
-    """
-    Filters the DataFrame to include only rows where ReferenceDate is within the last 6 months.
-    Also ensures missing ReferenceDate months are filled in with zero values for visualization.
+def add_count_column(df: pd.DataFrame):
 
-    Parameters:
-        df (pd.DataFrame): Input DataFrame with 'ReferenceDate' column.
-
-    Returns:
-        pd.DataFrame: Filtered DataFrame with missing months populated.
-    """
-    # Ensure ReferenceDate is in datetime format
-    df = df.copy()  # Avoid modifying the original DataFrame
-    df["ReferenceDate"] = pd.to_datetime(df["ReferenceDate"])
-
-   
-    max_date = pd.Timestamp(year=year, month=int(month), day=1)
-
-    # Start date = first day of the month 12 months ago
-    start_date = max_date - relativedelta(months=12)
-
-    # Filter SurgeryDate between start_date (inclusive) and max_date (exclusive)
-    mask = (df["ReferenceDate"] >= start_date) & (df["ReferenceDate"] < max_date)
-    df = df.loc[mask]
-
-    # Add a count column
     df["sum"] = 1
     df.loc[df["Animalid"].isna(), "sum"] = 0
     df["Month"] = df["ReferenceDate"].dt.to_period("M")
     return df
+
 
 def process_bi_data(df):
     # Replace NaN in 'sum' where 'Animalid' is missing
@@ -263,24 +256,26 @@ def process_bi_data(df):
 
     # Internal function to compute deceased percentage and assign category label
     def compute_percentage(df_subset, category_label):
-      outcome_summary = (
-          df_subset.groupby(["Month", "outcome_refined"])["sum"]
-          .sum()
-          .unstack(fill_value=0)
-      )
+        outcome_summary = (
+            df_subset.groupby(["Month", "outcome_refined"])["sum"]
+            .sum()
+            .unstack(fill_value=0)
+        )
 
-      # Ensure both columns exist
-      for col in ["deceased", "alive"]:
-          if col not in outcome_summary.columns:
-              outcome_summary[col] = 0
+        # Ensure both columns exist
+        for col in ["deceased", "alive"]:
+            if col not in outcome_summary.columns:
+                outcome_summary[col] = 0
 
-      # Calculate deceased percentage safely
-      total = outcome_summary["deceased"] + outcome_summary["alive"]
-      outcome_summary["deceased_pct"] = np.where(total == 0, 0, (outcome_summary["deceased"] / total) * 100)
+        # Calculate deceased percentage safely
+        total = outcome_summary["deceased"] + outcome_summary["alive"]
+        outcome_summary["deceased_pct"] = np.where(
+            total == 0, 0, (outcome_summary["deceased"] / total) * 100
+        )
 
-      result = outcome_summary.reset_index()[["Month", "deceased_pct"]]
-      result["AgeGroupCategory"] = category_label
-      return result
+        result = outcome_summary.reset_index()[["Month", "deceased_pct"]]
+        result["AgeGroupCategory"] = category_label
+        return result
 
     # Apply percentage calculation for both age groups
     below_2_result = compute_percentage(df_below_2, "0-2 wks")
@@ -293,7 +288,6 @@ def process_bi_data(df):
     return final_result
 
 
-
 def run_kitten_report(report_year: int, report_month: int, run_bi_data: bool = True):
     """Generate kitten mortality report and archive files by year/month"""
 
@@ -302,7 +296,9 @@ def run_kitten_report(report_year: int, report_month: int, run_bi_data: bool = T
 
     # --- Load and truncate data ---
     df = parse_combined_df(extraction, report_year, report_year, report_month)
-    df = truncate_report_to_data_month(df, report_year, report_month, filter_key="ReferenceDate")
+    df = truncate_report_to_data_month(
+        df, report_year, report_month, filter_key="ReferenceDate"
+    )
 
     # --- File paths ---
     files = {
@@ -316,12 +312,14 @@ def run_kitten_report(report_year: int, report_month: int, run_bi_data: bool = T
 
     # --- Optional Power BI dataset ---
     if run_bi_data:
-        two_year_df = parse_combined_df(extraction, report_year - 1, report_year, report_month)
-        two_year_df = truncate_report_to_data_month(
-            two_year_df, report_year, report_month, filter_key="ReferenceDate"
+        two_year_df = parse_combined_df(
+            extraction, report_year - 1, report_year, max_month=12
         )
 
-        power_bi_df = filter_last_twelve_months(two_year_df, report_year, report_month)
+        power_bi_df = filter_last_12_months(
+            two_year_df, report_year, report_month, filter_key="ReferenceDate"
+        )
+        power_bi_df = add_count_column(power_bi_df)
         power_bi_df_summary = process_bi_data(power_bi_df)
 
         with pd.ExcelWriter(files["bi_report"], engine="openpyxl") as writer:
@@ -341,7 +339,6 @@ def run_kitten_report(report_year: int, report_month: int, run_bi_data: bool = T
         base_path=base_path,
         paths_to_copy=[files["report"], files["dashboard"]],
     )
-    print(f"Kitten Mortality report generation for {report_year}-{report_month:02d} completed.")
-
-
-
+    print(
+        f"Kitten Mortality report generation for {report_year}-{report_month:02d} completed."
+    )

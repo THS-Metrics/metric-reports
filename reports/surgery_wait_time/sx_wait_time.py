@@ -19,7 +19,9 @@ def adult_extraction(year: int, month: int):
         SELECT *
         FROM (VALUES
             ('Orchidectomy, cryptorchid', 'Neuter'),
-            ('Orchidectomy',              'Neuter'),
+            ('Orchidectomy',   'Neuter'),
+            ('Orchidectomy Intra-Ab Crytorch', 'Neuter'),
+            ('Orchidectomy Inguinal',  'Neuter'),
             ('Ovariohysterectomy',         'Spay'),
             ('Dental Extraction',          'Dental'),
             ('Dental COHAT (Lv 1-3)',      'Dental'),
@@ -73,8 +75,6 @@ def adult_extraction(year: int, month: int):
     WHERE
         rs.Species IN ('Cat', 'Dog', 'Rabbit')
         AND ras.Stage IN ('Evaluate', 'Post -Op', 'Surgery Needed')
-        AND hs.LastUpdated >= '{first_date}'
-        AND hs.LastUpdated <  '{last_date}'
         AND et.StatusDateTime >= '{first_date}'
         AND et.StatusDateTime <  '{last_date}'),
 
@@ -266,8 +266,7 @@ def run_sx_wait_time_report(report_year: int, report_month: int, run_bi_data: bo
 
     # --- Optional BI dataset ---
     if run_bi_data:
-        yearly = parse_combined_df(adult_extract_function=adult_extraction, start_year=report_year-2, end_year=report_year, max_month=12)
-        yearly=truncate_report_to_data_month(yearly, report_year, report_month, filter_key="SurgeryDate")
+        yearly = parse_combined_df(adult_extract_function=adult_extraction, start_year=report_year-1, end_year=report_year, max_month=12)
         bi_data = filter_last_12_months(yearly, report_year, report_month, "SurgeryDate")
         bi_data.to_excel(files["bi_report"], index=False)
 

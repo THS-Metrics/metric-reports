@@ -328,12 +328,38 @@ def parvo_chart(*,numerator, denominator, path) -> None:
   #Creates an Outcome column specifying all numerator as Healthy.
   denominator["Outcome"]="Healthy" 
   denominator["Intaketype"]="Denominator"	
-  parvo_chart_data=pd.concat(
+  chart_data=pd.concat(
     [denominator[['animalid', 'species', 'Agegroup','Outcome','Intaketype', 'Referencedate']], 
     numerator[['animalid', 'species', 'Agegroup','Outcome','Intaketype', 'Referencedate']]],
     ignore_index=True
     )
-  parvo_chart_data.to_excel(path, index=False)
+  chart_data['Referencedate']=pd.to_datetime(chart_data['Referencedate'])
+  chart_data['sum']=1
+    # Creating a Referencedate range with the missing months
+  min_Referencedate = chart_data['Referencedate'].min()
+  max_Referencedate = chart_data['Referencedate'].max()
+  Referencedate_range = pd.date_range(min_Referencedate, max_Referencedate, freq='MS').date
+
+  # Generating the missing rows for dogs
+  missing_rows = []
+  for agegroup in ['Adult', 'Puppy']:
+    existing_Referencedates = chart_data[(chart_data['Outcome'] == 'Infected') & (chart_data['species'] == 'Dog') & (chart_data['Agegroup'] == agegroup)]['Referencedate']
+    missing_Referencedates = set(Referencedate_range) - set(existing_Referencedates)
+    for Referencedate in missing_Referencedates:
+        missing_rows.append({'Referencedate': Referencedate, 'Agegroup': agegroup, 'species': 'Dog', 'Outcome': 'Infected', 'sum':0})
+   # Generating the missing rows for cats
+  for agegroup in ['Adult', 'Kitten']:
+    existing_Referencedates = chart_data[(chart_data['Outcome'] == 'Infected') & (chart_data['species'] == 'Cat') & (chart_data['Agegroup'] == agegroup)]['Referencedate']
+    missing_Referencedates = set(Referencedate_range) - set(existing_Referencedates)
+    for Referencedate in missing_Referencedates:
+        missing_rows.append({'Referencedate': Referencedate, 'Agegroup': agegroup, 'species': 'Cat', 'Outcome': 'Infected', 'sum':0})
+  # Appending the missing rows to the DataFrame
+  # Convert missing rows to DataFrame before concatenating
+  missing_df = pd.DataFrame(missing_rows)
+  
+  # Appending the missing rows to the DataFrame
+  chart_data = pd.concat([chart_data, missing_df], ignore_index=True)
+  chart_data.to_excel(path, index=False)
   return
 
 

@@ -1,51 +1,36 @@
+from datetime import datetime, timedelta
 from reports.diarrhea.diarrhea_report import run_diarrhea_report
 from reports.kitten_mortality.kitten_report import run_kitten_report
 from reports.parvovirus.parvo_report import run_parvo_report
 from reports.shelter_vet_complications.incidence_report import run_incidence_report
-from reports.shelter_vet_complications.dental_report import run_dental_report
 from reports.ringworm.ringworm_report import run_ringworm_report
 from reports.uri.uri_report import run_uri_report
 from reports.surgery_wait_time.sx_wait_time import run_sx_wait_time_report
 from reports.delayed_euthanasia.delayed_euthanasia import run_euthanasia_report
 from reports.los_shelter.los_shelter_report import run_los_report
-#from reports.public_vet_complications.ezyvet import get_ezyvet_report
-from datetime import datetime
+from database.db_sync import update_db
 
 
-def run_all():
-    report_year= datetime.now().year
-    #scheduled to run report for previous month
-    report_month=datetime.now().month -1
-    
-    run_diarrhea_report(report_year,report_month)
-    run_kitten_report(report_year,report_month)
-    run_parvo_report(report_year,report_month)
-    run_dental_report(report_year,report_month)
-    run_incidence_report(report_year,report_month)
-    run_ringworm_report(report_year,report_month)
-    run_uri_report(report_year,report_month)
-    run_los_report(report_year,report_month)
-    run_sx_wait_time_report(report_year,report_month)
+def run_all(report_year: int, report_month: int, update_power_bi: bool):
+    run_diarrhea_report(report_year, report_month)
+    run_kitten_report(report_year, report_month)
+    run_parvo_report(report_year, report_month)
+    run_incidence_report(report_year, report_month)
+    run_ringworm_report(report_year, report_month)
+    run_uri_report(report_year, report_month)
+    run_los_report(report_year, report_month)
+    run_sx_wait_time_report(report_year, report_month)
     run_euthanasia_report(report_year, report_month)
-    return 
 
 
 if __name__ == "__main__":
-    #run_all()
-    #run_dental_report(2026,1)
-    #run_incidence_report(2026,1,False)
-    #run_kitten_report(2026, 1)
-    #run_kitten_report(2025, 12)
-    run_bi_data=False
-    for year in range(2019, 2026):
-        for month in range(1,13):
-            run_sx_wait_time_report(year, month,run_bi_data)
-            #run_incidence_report(year, month,run_bi_data)
-            #run_dental_report(year, month)
-            #run_diarrhea_report(year,month,run_bi_data )
-            #run_uri_report(year,month, run_bi_data)
-            #run_kitten_report(year,month, run_bi_data)
-            #run_sx_wait_time_report(year,month, run_bi_data)
-            pass
-    
-            
+    # Scheduled to run reports for the previous month
+    # previous_month = datetime.now().replace(day=1) - timedelta(days=1)
+    report_year = 2026
+    report_month = 9
+    update_power_bi = True
+    update_database = True
+    if update_database:
+        update_db()
+
+    run_euthanasia_report(report_year, report_month)

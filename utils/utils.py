@@ -56,29 +56,42 @@ def update_dashboard(dashboard_path: str):
         pythoncom.CoUninitialize()
 
 
+def save_single_to_excel(data: pd.DataFrame, sheet_name: str, path: str):
+    with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
+        data.to_excel(writer, index=False, sheet_name=sheet_name)
 
-def save_to_excel(numerator, denominator, path: str):
+        worksheet = writer.sheets[sheet_name]
 
-    writer = pd.ExcelWriter(path, engine='xlsxwriter')
-
-    denominator.to_excel(writer, index=False, sheet_name='Denominator')
-    numerator.to_excel(writer, index=False, sheet_name='Numerator')
-
-    workbook = writer.book
-    denom_ws = writer.sheets['Denominator']
-    num_ws = writer.sheets['Numerator']
-
-    for i, col in enumerate(denominator.columns):
-        width = max(denominator[col].astype(str).map(len).max(), len(col)) + 2
-        denom_ws.set_column(i, i, width)
-
-    for i, col in enumerate(numerator.columns):
-        width = max(numerator[col].astype(str).map(len).max(), len(col)) + 2
-        num_ws.set_column(i, i, width)
-
-    writer.close()
+        # Auto-fit column widths
+        for i, col in enumerate(data.columns):
+            width = max(data[col].astype(str).map(len).max(), len(col)) + 2
+            worksheet.set_column(i, i, width)
 
     print("Report file saved to server.")
+
+
+def save_to_excel(numerator: pd.DataFrame, denominator: pd.DataFrame, path: str):
+    with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
+
+        denominator.to_excel(writer, index=False, sheet_name="Denominator")
+
+        numerator.to_excel(writer, index=False, sheet_name="Numerator")
+
+        denom_ws = writer.sheets["Denominator"]
+        num_ws = writer.sheets["Numerator"]
+
+        # Auto-fit Denominator columns
+        for i, col in enumerate(denominator.columns):
+            width = max(denominator[col].astype(str).map(len).max(), len(col)) + 2
+            denom_ws.set_column(i, i, width)
+
+        # Auto-fit Numerator columns
+        for i, col in enumerate(numerator.columns):
+            width = max(numerator[col].astype(str).map(len).max(), len(col)) + 2
+            num_ws.set_column(i, i, width)
+
+    print("Report file saved to server.")
+
 
 async def combined_df_async(fetch_fn, start_year: int, end_year: int) -> pd.DataFrame:
     """
@@ -103,22 +116,21 @@ async def combined_df_async(fetch_fn, start_year: int, end_year: int) -> pd.Data
             if current_month == 1 and year == current_year:
                 for prev_month in range(1, 13):
                     print(year - 1, prev_month)
-                    tasks.append(
-                        asyncio.to_thread(fetch_fn, year - 1, prev_month)
-                    )
+                    tasks.append(asyncio.to_thread(fetch_fn, year - 1, prev_month))
                 break
             else:
                 print(year, month)
-                tasks.append(
-                    asyncio.to_thread(fetch_fn, year, month)
-                )
+                tasks.append(asyncio.to_thread(fetch_fn, year, month))
 
     # Run everything concurrently
     frames = await asyncio.gather(*tasks)
 
     return pd.concat(frames, ignore_index=True)
 
-def combined_df(fetch_fn, start_year: int, end_year: int, max_month:int=12) -> pd.DataFrame:
+
+def combined_df(
+    fetch_fn, start_year: int, end_year: int, max_month: int = 12
+) -> pd.DataFrame:
     """
     Build a combined DataFrame for all available months and years using a data-fetching function.
 
@@ -135,10 +147,10 @@ def combined_df(fetch_fn, start_year: int, end_year: int, max_month:int=12) -> p
     current_month = datetime.today().month
 
     for year in range(start_year, end_year + 1):
-        if year>current_year:
+        if year > current_year:
             break
-        for month in range(1, max_month+1):
-            
+        for month in range(1, max_month + 1):
+
             # Skip future months of the current year
             if year == current_year and month > current_month:
                 break
@@ -146,11 +158,11 @@ def combined_df(fetch_fn, start_year: int, end_year: int, max_month:int=12) -> p
             print(year, month)
             frames.append(fetch_fn(year, month))
             print(f"Data extracted for year: {year}, month: {month}")
-                
+
     return pd.concat(frames, ignore_index=True)
 
 
-def filter_last_12_months(df:pd.DataFrame, year:str, month:str,  filter_key:str):
+def filter_last_12_months(df: pd.DataFrame, year: str, month: str, filter_key: str):
     """
     Filters the DataFrame to include only rows where ReferenceDate is within the last 6 months.
     Also ensures missing ReferenceDate months are filled in with zero values for visualization.
@@ -161,29 +173,35 @@ def filter_last_12_months(df:pd.DataFrame, year:str, month:str,  filter_key:str)
     Returns:
         pd.DataFrame: Filtered DataFrame with missing months populated.
     """
-    year=int(year)
+    year = int(year)
     # Ensure ReferenceDate is in datetime format
     df[filter_key] = pd.to_datetime(df[filter_key])
 
-    max_date   = pd.Timestamp(year=year, month=int(month), day=1)
+    max_date = pd.Timestamp(year=int(year), month=int(month), day=1) + MonthEnd(0)
 
     # Start date = first day of the month 12 months ago
     start_date = max_date - relativedelta(months=12)
 
     # Filter SurgeryDate between start_date (inclusive) and max_date (exclusive)
-    mask = (df[filter_key] >= start_date) & (df[filter_key] < max_date)
+    mask = (df[filter_key] >= start_date) & (df[filter_key] <= max_date)
     df = df.loc[mask]
-
 
     return df
 
-def make_archive_copy(report_year: int, report_month: int, base_path: str, paths_to_copy: list):
+
+def make_archive_copy(
+    report_year: int, report_month: int, base_path: str, paths_to_copy: list
+):
     """Copy files to year/month folder, rename if mapped, and append year/month to filenames"""
 
     # --- Create archive folder with month name ---
     month_name = calendar.month_name[report_month]  # e.g., 2 -> "February"
-    archive_folder = os.path.join(base_path, "data_archives", str(report_year), month_name)
-    dashboard_archive_folder= os.path.join(base_path, "dashboard_archives", str(report_year), month_name)
+    archive_folder = os.path.join(
+        base_path, "data_archives", str(report_year), month_name
+    )
+    dashboard_archive_folder = os.path.join(
+        base_path, "dashboard_archives", str(report_year), month_name
+    )
     os.makedirs(archive_folder, exist_ok=True)
     os.makedirs(dashboard_archive_folder, exist_ok=True)
 
@@ -196,7 +214,8 @@ def make_archive_copy(report_year: int, report_month: int, base_path: str, paths
         "ringworm_dashboard_template.xlsx": "Ringworm.xlsx",
         "parvovirus_dashboard_template.xlsx": "Parvo.xlsx",
         "los_dashboard_template.xlsx": "Los_Shelter.xlsx",
-        "diarrhea_dashboard_template.xlsx": "Diarrhea.xlsx"
+        "diarrhea_dashboard_template.xlsx": "Diarrhea.xlsx",
+        "uri_calici_dashboard_template.xlsx": "URI_Calici.xlsx",
     }
 
     # --- Copy each file ---
@@ -207,16 +226,15 @@ def make_archive_copy(report_year: int, report_month: int, base_path: str, paths
         original_filename = os.path.basename(file_path)
 
         # --- Rename if in mapping ---
-        copy_to_dashboard_archive= False
+        copy_to_dashboard_archive = False
         print(original_filename)
         if original_filename.lower() in filename_mapping:
             print(original_filename.lower())
             print("found")
             final_base_name = filename_mapping[original_filename.lower()]
-            copy_to_dashboard_archive=True
+            copy_to_dashboard_archive = True
         else:
             final_base_name = original_filename
-            
 
         # Split name and extension
         filename, ext = os.path.splitext(final_base_name)
@@ -235,7 +253,9 @@ def make_archive_copy(report_year: int, report_month: int, base_path: str, paths
             shutil.copy(file_path, dashboard_dest_path)
 
 
-def truncate_report_to_data_month(df: pd.DataFrame, year: str, month: str, filter_key: str):
+def truncate_report_to_data_month(
+    df: pd.DataFrame, year: str, month: str, filter_key: str
+):
     """
     Filters the DataFrame to include only rows where filter_key is between
     the first day of the year and the last day of the specified month.

@@ -335,6 +335,7 @@ def uri_chart(*,numerator, denominator, path) -> None:
     numerator[['animalid', 'species', 'Agegroup','Outcome','Intaketype', 'Referencedate']]],
     ignore_index=True
     )
+  chart_data['Referencedate']=pd.to_datetime(chart_data['Referencedate'])
   #Assign value of 1 to real data values
   #We will assign value of 0 to virtual data values used to account for months with no incidence data
   chart_data['sum']=1
@@ -423,15 +424,9 @@ def run_uri_report(report_year: int, report_month: int, run_bi_data: bool = True
         df_denom_prev = parse_combined_data(uri_denominator, report_year - 1)
         df_num_prev = parse_combined_data(uri_numerator, report_year - 1)
 
-        two_year_denom = truncate_report_to_data_month(
-            pd.concat([df_denom_prev, df_denom], ignore_index=True),
-            report_year, report_month, filter_key="Referencedate"
-        )
+        two_year_denom = pd.concat([df_denom_prev, df_denom], ignore_index=True)
 
-        two_year_num = truncate_report_to_data_month(
-            pd.concat([df_num_prev, df_num], ignore_index=True),
-            report_year, report_month, filter_key="Referencedate"
-        )
+        two_year_num = pd.concat([df_num_prev, df_num], ignore_index=True)
         bi_data = uri_chart(
             path=files["bi_report"],
             numerator=two_year_num,
