@@ -227,6 +227,7 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
             a.Name,
             s.Species,
             CAST(v.tIn_DateCreated AS DATE) AS IntakeDate,
+            v.IntakeType, 
             CAST(COALESCE(v.tOut_DateCreated, ad.ReleaseDate) AS DATE) AS OutcomeDate,
             COALESCE(v.OutComeType, 'No Outcome Yet') AS Outcome
         FROM Animal a
@@ -234,14 +235,13 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
         LEFT JOIN txnVisit v ON v.AnimalID = a.AnimalID
         LEFT JOIN Adoption ad ON ad.AnimalID = a.AnimalID
         WHERE 
-            (v.IntakeType IN ('TransferIn', 'OwnerSurrender', '[Return]', 'Stray') OR v.IntakeType IS NULL)
-            AND v.tIn_DateCreated >= '{reference_date}'
+             v.tIn_DateCreated >= '{reference_date}'
             AND v.tIn_DateCreated <= '{last_date}'
     ),
     /* Keep only those whose outcome is AFTER the report date OR NULL (i.e., still no outcome as of report date) */
     without_outcome AS (
         SELECT 
-            AnimalID, Name, Species, IntakeDate, OutcomeDate, Outcome
+            AnimalID, Name, Species, IntakeDate, IntakeType, OutcomeDate, Outcome
         FROM month_intake
         WHERE OutcomeDate > '{last_date}'
         OR OutcomeDate is NULL
@@ -250,26 +250,32 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
     latest_stagedate AS (
         SELECT
             hs.AnimalID,
-            MAX(hs.LastUpdated) AS StageDate
+            hs.LastUpdated AS StageDate,
+            rs.Stage,
+            hs.Status,
+            ROW_NUMBER() OVER (
+                PARTITION BY hs.AnimalID
+                ORDER BY hs.LastUpdated DESC
+            ) AS rn
         FROM HistoryStatus hs
         JOIN refAnimalStage rs
-        on rs.StageID=hs.StageID
-        
+            ON rs.StageID = hs.StageID
         WHERE hs.LastUpdated > DATEADD(YEAR, -5, '{last_date}')
         AND hs.LastUpdated <= '{last_date}'
-        GROUP BY hs.AnimalID
     ),
 
     past_intakes AS (
         SELECT
             v.AnimalID,
-            MAX(v.tIn_DateCreated) AS IntakeDate
+            v.tIn_DateCreated AS IntakeDate,
+            v.IntakeType,
+            ROW_NUMBER() OVER (
+                PARTITION BY v.AnimalID
+                ORDER BY v.tIn_DateCreated DESC
+            ) AS rn
         FROM txnVisit v
         WHERE v.tIn_DateCreated IS NOT NULL
-         AND (v.IntakeType IN ('TransferIn', 'OwnerSurrender', '[Return]', 'Stray') OR v.IntakeType IS NULL)
-         
         AND v.tIn_DateCreated < '{reference_date}'
-        GROUP BY v.AnimalID
     ),
     past_non_outcome_date AS (
     SELECT
@@ -290,23 +296,27 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
     ),
     /* Keep only those whose outcome is AFTER the report date OR NULL (i.e., still no outcome as of report date) */
     inventory_nonoutcomed AS (
-        SELECT 
+        SELECT
             ls.AnimalID,
             a.Name,
             s.Species,
             CAST(pi.IntakeDate AS DATE) AS IntakeDate,
+            pi.IntakeType,
             CAST(COALESCE(pd.OutcomeDate, '{last_date}') AS DATE) AS OutcomeDate,
             ls.StageDate,
-            status
+            ls.Stage,
+            ls.Status
         FROM latest_stagedate ls
-        JOIN Animal a ON ls.AnimalID = a.AnimalID
-        JOIN refSpecies s ON a.SpeciesID = s.SpeciesID
-        join HistoryStatus
-            on HistoryStatus.LastUpdated=ls.stagedate
-        JOIN past_intakes pi ON pi.AnimalID = ls.AnimalID
-        JOIN past_non_outcome_date pd
-        on pd.AnimalID=pi.AnimalID
-
+        JOIN Animal a
+            ON a.AnimalID = ls.AnimalID
+        JOIN refSpecies s
+            ON s.SpeciesID = a.SpeciesID
+        JOIN past_intakes pi
+            ON pi.AnimalID = ls.AnimalID
+        AND pi.rn = 1
+        LEFT JOIN past_non_outcome_date pd
+            ON pd.AnimalID = ls.AnimalID
+        WHERE ls.rn = 1
     ),
 
     nonoutcomed AS (
@@ -315,6 +325,7 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
             inv.Name,
             inv.Species,
             CAST(inv.IntakeDate AS DATE) AS IntakeDate,
+            inv.IntakeType, 
             '{last_date}' AS Outcomedate  -- Default Outcomedate for non outcomed animals
         FROM inventory_nonoutcomed inv
         WHERE Status = 'A'
@@ -326,20 +337,41 @@ def los_nonoutcome_script(year: int, month: int) -> pd.DataFrame:
             Name,
             Species,
             CAST(IntakeDate AS DATE) AS IntakeDate,
+            IntakeType,
             '{last_date}' AS Outcomedate  -- Default Outcomedate for non outcomed animals
         FROM without_outcome   
     ),
-    total_nonoutcomed AS
-    (SELECT 
+    nonoutcomed_ranked AS (
+        SELECT
+            n.*,
+            ROW_NUMBER() OVER (
+                PARTITION BY n.AnimalID
+                ORDER BY n.IntakeDate DESC
+            ) AS rn
+        FROM nonoutcomed n
+        WHERE n.Outcomedate >= n.IntakeDate
+        AND (
+            n.IntakeType IN (
+                'TransferIn',
+                'OwnerSurrender',
+                '[Return]',
+                'Stray'
+            )
+            OR n.IntakeType IS NULL
+        )
+    ),
+
+    total_nonoutcomed AS (
+        SELECT
             AnimalID,
             Name,
             Species,
-            MAX(IntakeDate) as IntakeDate,
+            IntakeDate,
+            IntakeType,
             Outcomedate
-            from nonoutcomed
-            where Outcomedate >= IntakeDate
-            GROUP BY AnimalID, Name, Species, Outcomedate
-            ),
+        FROM nonoutcomed_ranked
+        WHERE rn = 1
+    ),
     
     location_history AS (
         SELECT 
